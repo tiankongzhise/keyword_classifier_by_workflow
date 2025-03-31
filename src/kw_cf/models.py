@@ -106,7 +106,7 @@ def _preserve_order_deduplicate(lst: List[str]) -> List[str]:
 class UnclassifiedKeywords(BaseModel):
     '''
     未分类关键词,对传入的未分类关键词进行预处理,去除不可见字符串，空值过滤,并保序去重
-    对来源进行验证，当level为0时，不验证来源文件和sheet,因为level为0时，输入为用户手动选择的待分类文件，验证无意义。
+    对来源进行验证，当level为1时，不验证来源文件和sheet,因为level为1时，输入为用户手动选择的待分类文件，验证无意义。
     当level>=1,需要有来源文件，标明来自哪个分类文件
     当level>=2,需要有来源sheet,标明来自哪个分类sheet
 
@@ -120,12 +120,13 @@ class UnclassifiedKeywords(BaseModel):
         UnclassifiedKeywords:未分类关键词
     '''
     data: List[str] # 未分类关键词
-    souce_file_name: str|None = Field(None, min_length=1, description="关键词来源文件名称" ) # 关键词来源文件名称
-    souce_sheet_name: str | None = Field(None, min_length=1, description="关键词来源sheet名称" )# 关键词来源sheet名称
+    source_file_name: str|None = Field(None, min_length=1, description="关键词来源文件名称" ) # 关键词来源文件名称
+    source_sheet_name: str | None = Field(None, min_length=1, description="关键词来源sheet名称" )# 关键词来源sheet名称
     level: int = Field(..., ge=0, description="未分类关键词层级" ) # 未分类关键词层级
     error_callback: Optional[Callable[..., Any]] = Field(
         None, exclude=True, description="错误信息回调函数"
     )
+
 
     @field_validator("data", mode='before')
     def processing_pipeline(cls, v: Any, info: ValidationInfo) -> List[str]:
@@ -156,18 +157,18 @@ class UnclassifiedKeywords(BaseModel):
 
         return _preserve_order_deduplicate(non_empty)
 
-    def empty(self) -> bool:
+    def is_empty(self) -> bool:
         """判断是否为空"""
 
         return not bool(self.data)
     
     @model_validator(mode = 'after')
-    def validate_rules(self)->None:
+    def validate_rules(self)->'UnclassifiedKeywords':
         """验证规则"""
         err_msg = []
-        if self.level >= 1 and not self.output_name:
+        if self.level > 1 and not self.source_file_name:
             err_msg.append(f"未分类关键词 {self.data} 的层级大于1，但没有指定来源文件名称")
-        if self.level >= 2 and not self.souce_sheet_name:
+        if self.level > 2 and not self.source_sheet_name:
             err_msg.append(f"未分类关键词 {self.data} 的层级大于等于2，但没有指定来源sheet名称")
         if err_msg:
             if self.error_callback:
@@ -184,16 +185,16 @@ class ClassifiedWord(BaseModel):
     args:
         keyword:str 关键词
         matched_rule:str 匹配的规则,未匹配任何规则是为''
-        souce_file_name:str|None 关键词来源文件名称
-        souce_sheet_name:str|None 关键词来源sheet名称
+        source_file_name:str|None 关键词来源文件名称
+        source_sheet_name:str|None 关键词来源sheet名称
         level:int 工作流层级，从0开始，0表示最初的待分类关键词
     return:
         ClassifiedWord:关键词分类中间状态
     '''
     keyword: str
     matched_rule:str
-    souce_file_name:str|None = Field(None,min_length=1,description="关键词来源文件名称")# 关键词来源文件名称
-    souce_sheet_name:str|None = Field(None,min_length=1,description="关键词来源sheet名称")# 关键词来源sheet名称
+    source_file_name:str|None = Field(None,min_length=1,description="关键词来源文件名称")# 关键词来源文件名称
+    source_sheet_name:str|None = Field(None,min_length=1,description="关键词来源sheet名称")# 关键词来源sheet名称
     level:int = Field(...,ge=0,description="关键词层级")# 工作流层级层级
     error_callback: Optional[Callable[..., Any]] = Field(
         None, exclude=True, description="错误信息回调函数"
@@ -473,6 +474,7 @@ class UnMatchedKeyword(BaseModel):
         rule_tag:规则标签
         parent_rule_columon:父级规则列名
         rule_tag_columon:规则标签列名
+        source_sheet_name:来源工作表名称
     '''
     keyword:str = Field(...,min_length=1,description="关键词")
     output_name:str = Field(...,min_length=1,description="输出文件名称,默认未匹配关键词")
@@ -565,7 +567,7 @@ class ClassifiedResult(BaseModel):
         classified_conditions: Optional[Dict[str, Any]] = None,
         unclassified_conditions: Optional[Dict[str, Any]] = None,
         require_all: bool = True
-    ) -> Optional['ClassifiedResult']:
+    ) -> 'ClassifiedResult':
         """
         根据条件筛选分类结果
         
@@ -617,7 +619,7 @@ class ProcessFilePath(BaseModel):
     '''
     level:int = Field(...,ge=1,description="分类层级")# 分类层级
     output_name:str = Field(...,min_length=1,description="输出文件名称")# 输出文件名称
-    file_path:Path = Field(...,min_length=1,description="文件路径")# 文件路径
+    file_path:Path = Field(...,description="文件路径")# 文件路径
     classified_sheet_name:str|None = Field(None,min_length=1,description="输出sheet名称")# 输出sheet名称
     
 
@@ -667,7 +669,7 @@ class ProcessFilePaths(BaseModel):
                     break
             if match:
                 filtered_file_paths.append(file_path)
-        return ProcessFilePaths(file_paths=filtered_file_paths) if filtered_file_paths else None
+        return ProcessFilePaths(file_paths=filtered_file_paths)
     
     def empty(self)->bool:
         """判断是否为空"""
@@ -676,15 +678,19 @@ class ProcessFilePaths(BaseModel):
 
 class ProcessTempResult(BaseModel):
     '''
+    流程的阶段结果
+
     args:
+
         level:int 阶段
         status:str 处理结果
         data:ClassifiedResult 处理结果
         message:str|None 错误信息
+
     '''
     level:int = Field(...,ge=1,description="分类层级")# 分类层级
     status:Literal["success", "fail", "warning"] = Field(...,description="处理结果")# 处理结果
-    data:ClassifiedResult = Field(...,description="处理结果")# 处理结果
+    data:ClassifiedResult|None = Field(...,description="处理结果")# 处理结果
     message:str|None = Field(None,description="错误信息")# 错误信息
     
     @model_validator(mode = 'after')
@@ -692,18 +698,23 @@ class ProcessTempResult(BaseModel):
         """验证规则"""
         if self.status != "success" and (self.message is None or self.message == ""):
             raise ValueError(f"level:{self.level},status:{self.status},message:{self.message},请填写错误信息")
+        return self
 
 class ProcessLevelResult(BaseModel):
     '''
+    流程的中间结果
+
     args:
+
         level:int 阶段
         status:Literal["success", "fail", "warning"]  处理结果
         next_level:int 下一个阶段名称,9999标识结束
         message:str|None 错误信息
+
     '''
     level:int = Field(...,ge=0,description="阶段")# 阶段
     status:Literal["success", "fail", "warning"] = Field(...,description="处理结果")# 处理结果
-    next_level:int = Field(...,ge=1,description="下一个阶段名称")# 下一个阶段名称
+    next_level:int = Field(...,ge=0,description="下一个阶段名称")# 下一个阶段名称
     message:str|None = Field(None,description="错误信息")# 错误信息
 
     @model_validator(mode = 'after')

@@ -1,7 +1,8 @@
 from src.kw_cf.excel_handler import ExcelHandler
 from src.kw_cf.models import UnclassifiedKeywords, SourceRules
 from src.kw_cf.keyword_classifier import KeywordClassifier
-from src.kw_cf.workflow_processor import WorkFlowProcessor
+# from src.kw_cf.workflow_processor import WorkFlowProcessor
+from src.kw_cf.workflow_processor_copy import WorkFlowProcessor
 from pathlib import Path
 
 
@@ -60,7 +61,8 @@ def main():
         work_flowr_file=Path('data/工作流规则_否词.xlsx'),
         output_dir=Path('result'),  
     )
-    test.test_workflow_processor()
+    rsp = test.test_workflow_processor()
+    print(f'rsp:{rsp}')
     
 if __name__ == '__main__':
     main()

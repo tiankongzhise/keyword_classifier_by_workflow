@@ -3,13 +3,13 @@ from pathlib import Path
 from .keyword_classifier import KeywordClassifier
 from .excel_handler import ExcelHandler
 from .logger_config import logger
-from typing import List,Dict,Optional,Callable,cast,Any,Literal
+from typing import List,Dict,Optional,Callable,cast,Any,Literal,Mapping
 from . import models
 import pandas as pd
 import datetime
 
 
-class GetProcessResult(object):
+class GetProcessLevelResult(object):
     def __init__(self,parent_self:'WorkFlowProcessor'):
         self.parent_self = parent_self
     
@@ -18,9 +18,9 @@ class GetProcessResult(object):
                 status:Literal["success", "warning"],
                 message:str|None = None,
                 next_level:Optional[int] = None,
-                )->models.ProcessResult:
+                )->models.ProcessLevelResult:
         '''
-        封装返回处理成功的结果,会自动从实例中读取level，如果未设置下一级则自动设置为当前level+1，并且会更新实例的level
+        封装返回处理成功的结果,会自动从实例中读取level，如果未设置下一级则自动设置为当前level+1，更新实例的level
         args:
             status: 处理状态
             message: 处理结果信息
@@ -29,19 +29,20 @@ class GetProcessResult(object):
             ProcessResult: 处理结果
         '''
         level = self.parent_self.get('level')
-        self.parent_self.add_level()
         if next_level is None:
+            self.parent_self.add_level()
             next_level = self.parent_self.get('level')
-        
-        return models.ProcessResult(
+        else:
+            self.parent_self.set('level',next_level)
+        return models.ProcessLevelResult(
                 level=level,
                 status=status,
                 message=message,
-                next_level=next_level
+                next_level=cast(int,next_level)
             )
     def fail(self,
              message:str,
-             )->models.ProcessResult:
+             )->models.ProcessLevelResult:
         '''
         封装返回处理失败的结果,会自动从实例中读取level，并自动设置下一级level为9999，并且会更新实例的level
         args:
@@ -52,14 +53,59 @@ class GetProcessResult(object):
         '''
         level = self.parent_self.get('level')
         self.parent_self.set('level',9999)
-        return models.ProcessResult(
+        return models.ProcessLevelResult(
             level=level,
             status='fail',
             message=message,
             next_level=9999  
         )
              
-             
+class GetProcessTempResult(object):
+    def __init__(self,parent_self:'WorkFlowProcessor'):
+        self.parent_self = parent_self
+    
+    
+    def success(self,
+                status:Literal["success", "warning"],
+                data:models.ClassifiedResult,
+                message:str|None = None,
+                )->models.ProcessTempResult:
+        '''
+        封装返回处理成功的结果,会自动从实例中读取level，如果未设置下一级则自动设置为当前level+1，不会更新实例的level
+        args:
+            status: 处理状态
+            message: 处理结果信息
+            next_level: 下一级工作流运行长度 9999标识结束，如果未输入，则为当前level+1
+        reuturn:
+            ProcessResult: 处理结果
+        '''
+        level = self.parent_self.get('level')
+        return models.ProcessTempResult(
+                level=level,
+                status=status,
+                data=data,
+                message=message,
+            )
+    def fail(self,
+             message:str,
+             data:models.ClassifiedResult|None = None,
+             )->models.ProcessTempResult:
+        '''
+        封装返回处理失败的结果,会自动从实例中读取level，并自动设置下一级level为9999，并且会更新实例的level
+        args:
+            status: 处理状态
+            message: 处理结果信息
+        reuturn:
+            ProcessResult: 处理结果
+        '''
+        level = self.parent_self.get('level')
+        return models.ProcessTempResult(
+            level=level,
+            status='fail',
+            message=message,
+            data=data
+        )
+                          
     
 
 class WorkFlowProcessor:
@@ -76,11 +122,12 @@ class WorkFlowProcessor:
         """
         self.excel_handler:ExcelHandler = excel_handler or ExcelHandler(error_callback) # Excel处理器实例
         self.classifier:KeywordClassifier = keyword_classifier or KeywordClassifier(error_callback=error_callback) # 创建关键词分类器实例
-        self.get_process_result = GetProcessResult(self) # 封装返回处理结果的函数
+        self.get_process_result = GetProcessLevelResult(self) # 封装返回处理结果
+        self.get_process_temp_result = GetProcessTempResult(self) # 封装返回过程结果
         self.error_callback:Optional[Callable] = error_callback # 错误回调函数
-        self.workflow_rules:Optional[models.WorkFlowRules] = None # 全部工作流规则
-        self.process_file_path:models.ProcessFilePaths = None #包含分类sheet的运行结果
-        self.max_process_level:int = 0 # 工作流运行长度
+        self.workflow_rules:models.WorkFlowRules = None # 全部工作流规则 #type:ignore
+        self.process_file_path:models.ProcessFilePaths = None #包含分类sheet的运行结果 #type:ignore
+        self.max_process_level:int = 0 # 工作流运行长度 
         self.level:int = 0 # 当前工作流运行长度
 
         self.output_dir = Path('./工作流结果')# 输出文件夹
@@ -93,8 +140,7 @@ class WorkFlowProcessor:
             temp_dict = {}
             temp_dict['关键词'] = unmatched_keyword.keyword
             temp_dict['分类层级'] = unmatched_keyword.level
-            if unmatched_keyword.parent_rule:
-                temp_dict['父级规则'] = unmatched_keyword.parent_rule
+            temp_dict['来源sheet'] = unmatched_keyword.source_sheet_name
             result.append(temp_dict)
         return pd.DataFrame(result)
     
@@ -104,8 +150,9 @@ class WorkFlowProcessor:
             temp_dict = {}
             temp_dict['关键词'] = classified_keyword.keyword
             temp_dict['匹配的规则'] = classified_keyword.matched_rule
-            if classified_keyword.parent_rule:
-                temp_dict['父级规则'] = classified_keyword.parent_rule
+            if classified_keyword.level >2:
+                temp_dict[classified_keyword.parent_rule_column] = classified_keyword.parent_rule
+                temp_dict[classified_keyword.rule_tag_column] = classified_keyword.rule_tag
             result.append(temp_dict)
         return pd.DataFrame(result)
                 
@@ -120,7 +167,7 @@ class WorkFlowProcessor:
         return map_func[type(data[0])](data)
         
         
-    def _trans_words_to_cassified_result(self,classify_result:List[models.ClassifiedWord],workflow_rules:models.WorkFlowRules)->Optional[models.ClassifiedResult]:
+    def _trans_words_to_cassified_result(self,classify_result:List[models.ClassifiedWord],workflow_rules:models.WorkFlowRules)->models.ClassifiedResult:
         classified_keywords = []
         unclassified_keywords = []
         try:
@@ -128,28 +175,34 @@ class WorkFlowProcessor:
             for temp in classify_result:
                 keyword = temp.keyword
                 matched_rules = temp.matched_rule
+
   
                 temp_dict = {}
                 
-                # 确定映射属性
-                rule_item = workflow_rules.filter_rules(rule=matched_rules).rules
-                if rule_item == []:
-                    msg = f'_trans_words_to_cassified_result匹配异常，关键词匹配了一个分类工作流中不存在的规则。temp:{temp},workflow_rules:{workflow_rules}'
-                    if self.error_callback:
-                        self.error_callback(msg)
-                    raise Exception(msg)
-                rule_item = rule_item[0]
-                workflow_level = rule_item.level
-                output_name = rule_item.output_name
-                classified_sheet_name = rule_item.classified_sheet_name
-                parent_rule = rule_item.parent_rule
-                rule_tage = rule_item.rule_tag
-                parent_rule_column = f'阶段{workflow_level-1}父级规则'
-                rule_tag_column = f'阶段{workflow_level}规则标签'
+
                 
                 if matched_rules:
-
-                    
+                    # 确定映射属性
+                    rule_item = workflow_rules.filter_rules(rule=matched_rules)
+                    if rule_item is None:
+                        msg = f'_trans_words_to_cassified_result匹配异常，关键词匹配了一个分类工作流中不存在的规则。temp:{temp},workflow_rules:{workflow_rules}'
+                        if self.error_callback:
+                            self.error_callback(msg)
+                        raise Exception(msg)
+                    rule_item = rule_item.rules
+                    if rule_item == []:
+                        msg = f'_trans_words_to_cassified_result匹配异常，关键词匹配了一个分类工作流中不存在的规则。temp:{temp},workflow_rules:{workflow_rules}'
+                        if self.error_callback:
+                            self.error_callback(msg)
+                        raise Exception(msg)
+                    rule_item = rule_item[0]
+                    workflow_level = rule_item.level
+                    output_name = rule_item.output_name
+                    classified_sheet_name = rule_item.classified_sheet_name
+                    parent_rule = rule_item.parent_rule
+                    rule_tage = rule_item.rule_tag
+                    parent_rule_column = f'阶段{workflow_level-1}父级规则'
+                    rule_tag_column = f'阶段{workflow_level}规则标签'
                     #创建映射字典
                     temp_dict = {
                         'level':workflow_level,
@@ -174,40 +227,21 @@ class WorkFlowProcessor:
                         'keyword':keyword,
                         'output_name':souce_file_name or '未分类关键词',
                         'classified_sheet_name':'Sheet1' if souce_file_name is None else '未匹配关键词' ,
-                        'source_sheet_name':source_sheet_name
+                        'source_sheet_name':source_sheet_name or 'Sheet1'
                     }
                     unclassified_keywords.append(
                             models.UnMatchedKeyword( **temp_dict))
-            if classified_keywords:
-                return models.ClassifiedResult(classified_keywords=classified_keywords,unclassified_keywords=unclassified_keywords)
+
+            return models.ClassifiedResult(classified_keywords=classified_keywords,unclassified_keywords=unclassified_keywords)
         except Exception as e:
             msg = f"分类结果转换出错: {e},\nworkflow_rules: {workflow_rules},\nclassified_keywords:{classified_keywords},\nunclassified_keywords:{unclassified_keywords}"
             if self.error_callback:
                 self.error_callback(msg)
             raise Exception(msg) from e
         
-    def _create_mapping_dict(self,workflow_rules:models.WorkFlowRules)->dict:
-        try:
-            mapping_dict = {}
-            
-            mapping_dict['level'] = self.get('level')
-            for rule in workflow_rules.rules:
-                mapping_dict[rule.rule] = {
-                    'output_name':rule.output_name,
-                    'classified_sheet_name':rule.classified_sheet_name,
-                    'parent_rule':rule.parent_rule,
-                    'rule_tage':rule.rule_tag
-                }
-            return mapping_dict
-        except Exception as e:
-            msg = f"创建映射字典出错: {e},\nworkflow_rules:{workflow_rules}"
-            if self.error_callback:
-                self.error_callback(msg)
-            raise Exception(msg)
-
     def _get_classified_results(self,
                                 unclassified_keywords:models.UnclassifiedKeywords,
-                                workflow_rules:models.WorkFlowRules)->Optional[models.ClassifiedResult]:
+                                workflow_rules:models.WorkFlowRules)->models.ClassifiedResult:
         """关键词分类
         
         Args:
@@ -234,7 +268,7 @@ class WorkFlowProcessor:
             
             return classified_reuslt
         except Exception as e:
-            msg = f"_get_classified_results出错: {e},\nunclassified_keywords:{unclassified_keywords},\nworkflow_rules:{workflow_rules}"
+            msg = f"_get_classified_results出错: {e}"
             if self.error_callback:
                 self.error_callback(msg)
             raise Exception(msg) from e
@@ -306,7 +340,7 @@ class WorkFlowProcessor:
         
 
     def _special_rules_match_process(self,workflow_rules:models.WorkFlowRules,stage_results:Dict,
-                                      error_callback=None)->models.WorkFlowRules:
+                                      error_callback=None)->Optional[models.WorkFlowRules]:
         try:
             output_name_list = []
             classified_sheet_name_dict = {}
@@ -341,7 +375,7 @@ class WorkFlowProcessor:
             if error_callback:
                 error_callback(msg)
             raise Exception(msg)
-    def _special_rules_match_process_v1(self,workflow_rules:models.WorkFlowRules,stage_results:Dict)->models.WorkFlowRules:
+    def _special_rules_match_process_v1(self,workflow_rules:models.WorkFlowRules,stage_results:Dict)->Optional[models.WorkFlowRules]:
         try:
             output_name_list = []
             classified_sheet_name_dict = {}
@@ -384,7 +418,7 @@ class WorkFlowProcessor:
         self,
         excel_path: str,
         sheet_name: str,
-        keyword_to_rule:Dict[str,str],
+        keyword_to_rule:Mapping[str,str],
         new_column_name: str = "规则1"
     ):
         """
@@ -402,7 +436,7 @@ class WorkFlowProcessor:
             
 
             # 新增列，默认值为空（未匹配到的行留空）
-            df[new_column_name] = df["关键词"].map(keyword_to_rule)
+            df[new_column_name] = df["关键词"].map(keyword_to_rule) #type:ignore
             
             # 保存回原文件
             with pd.ExcelWriter(excel_path, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
@@ -412,7 +446,7 @@ class WorkFlowProcessor:
             err_msg = f'add_matched_rule_with_pandas 保存文件失败{e}'
             if self.error_callback:
                 self.error_callback(err_msg)
-            raise err_msg
+            raise Exception(err_msg)
     def add_matched_rules_with_pandas(
         self,
         excel_path: str,
@@ -490,420 +524,6 @@ class WorkFlowProcessor:
             temp_list.extend(special_rules.rules)
         return models.WorkFlowRules(rules=temp_list)
     
-    def process_stage1(self,keywords:models.UnclassifiedKeywords)->models.ClassifiedResult:
-        """处理第一阶段的关键词分类"""
-        try:
-            # 获取一阶段分类规则
-            stage1_rules = self.workflow_rules.get(1)
-            # 分类关键词
-            result = self._get_classified_results(keywords,stage1_rules)
-            if result is None:
-                msg = '第一阶段关键词分类结果为空'
-                if error_callback:
-                    error_callback(msg)
-                raise Exception(msg)
-            return result
-        except Exception as e:
-            msg = f"获取一阶段分类规则失败：{e}"
-            if error_callback:
-                error_callback(f"获取一阶段分类规则失败：{e}")
-            raise Exception(msg) from e
-
-    def save_stage1_results(self,classified_result:models.ClassifiedResult,error_callback=None)->StageOneRestsultTypeDict:
-        """保存第一阶段分类结果
-        
-        Args:
-            classified_result: 分类结果
-            error_callback: 错误回调函数
-            
-        Returns:
-            保存的文件路径字典
-        """
-        # result = {
-        #     code:None,
-        # }
-        success_file_paths:Dict[str,Path] = {}
-        try:
-            # 获取分类结果
-            unmatched_keywords = classified_result.get_grouped_keywords(group_by='output_name',match_type='unmatch')
-            matched_keywords = classified_result.get_grouped_keywords(group_by='output_name',match_type='match')
-            
-            try:
-                # 保存分类失败的关键词
-                if unmatched_keywords:
-                    for output_name, unclassify_keyword_list in unmatched_keywords.items():
-                        output_file = self.output_dir / f'{output_name}_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}.xlsx'
-                        df = self._transform_to_df(unclassify_keyword_list)
-                        self.excel_handler.save_results(df, output_file,sheet_name='Sheet1')
-            except Exception as e:
-                err_msg = f'保存分类失败的关键词失败：{e}'
-                if error_callback:
-                    error_callback(err_msg)
-                raise Exception(f"保存分类失败的关键词失败：{e}")
-            
-            try:
-                if matched_keywords:
-                    for output_name, matched_keyword_list in matched_keywords.items():
-                        output_file:Path = self.output_dir / f'{output_name}_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}.xlsx'
-                        df = self._transform_to_df(matched_keyword_list)
-                        self.excel_handler.save_results(df, output_file,sheet_name='Sheet1')
-                        success_file_paths[cast(str,output_name)] = output_file
-                    return success_file_paths
-            except Exception as e:
-                err_msg = f'保存分类成功的关键词失败：{e}'
-                if error_callback:
-                    error_callback(err_msg)
-                raise Exception(f"保存分类成功的关键词失败：{e}")
-        except Exception as e:
-            err_msg = f'获取分类结果失败：{e}'
-            if error_callback:
-                error_callback(err_msg)
-            raise Exception(f"获取分类结果失败：{e}")
-    
-
-    def process_stage2(self, stage1_files: Dict[str, Path], workflow_rules: models.WorkFlowRules, 
-                      error_callback=None) -> Dict[str, models.ClassifiedResult]:
-        """处理阶段2：分层处理（Sheet2处理）
-        
-        Args:
-            stage1_files: 阶段1生成的文件路径字典
-            workflow_rules: 工作流规则字典
-            error_callback: 错误回调函数
-            
-        Returns:
-            更新后的文件路径字典
-        """
-        # 检查是否有Sheet2规则
-        if workflow_rules.get('Sheet2') is None:
-            msg = '找不到Sheet2规则，已经返回'
-            if error_callback:
-                error_callback(msg)
-            return msg
-        
-        try:
-            # 获取分类流程2的规则
-            sheet2_rules = workflow_rules.filter_rules(source_sheet_name='Sheet2')
-            stage2_results = {}
-            
-            # 处理每个阶段1文件
-            for output_name, file_path in stage1_files.items():
-                # 读取阶段1文件
-                stage1_df = self.excel_handler.read_stage_results(file_path)
-                
-                #获取需要分类的关键词
-                unclassified_keyword = self._process_stage_df(stage1_df,2,error_callback=error_callback)
-                
-                # 获取分类规则
-                output_name_rules = sheet2_rules.filter_rules(output_name=output_name)
-                
-                if output_name_rules:
-                    classified_result = self._get_classified_results(unclassified_keyword,output_name_rules,2,error_callback=error_callback)
-                    stage2_results[output_name] = classified_result
-                else:
-                    msg = f'找不到{output_name}的Sheet2规则，已经返回'
-                    if error_callback:
-                        error_callback(msg)
-            return stage2_results
-        except Exception as e:
-            raise Exception(f"处理阶段2失败: {str(e)}")
-    
-
-    def save_stage2_results(self, stage1_files,classified_result: Dict[str,models.ClassifiedResult], error_callback=None) -> dict[str, Stage2OutputNameDict]:
-        """保存阶段2分类结果
-        
-        Args:
-            classified_result: 分类结果
-            error_callback: 错误回调函数
-            
-        Returns:
-            保存的文件路径字典
-        """
-        try:
-            stage2_result = {}
-            for key,values in classified_result.items():
-                file_path = stage1_files[key]
-                # 使用Excel写入器追加新Sheet
-                with pd.ExcelWriter(file_path, engine='openpyxl', mode='a') as writer:
-                    stage2_result[key] = {'file_path': file_path, 'classified_sheet_name': []}
-                    if values is None:
-                        logger.warning(f'{key}没有分类结果')
-                        continue
-                    for key, classified_keyword_list in values.group_by_output_name_and_sheet(match_type='match').items():
-                        output_name,classified_sheet_name = key
-                        df = self._transform_to_df(classified_keyword_list)
-                        df.to_excel(writer, sheet_name=classified_sheet_name, index=False)
-                        stage2_result[output_name]['classified_sheet_name'].append(classified_sheet_name)
-                    for key, unclassified_keyword_list in values.group_by_output_name_and_sheet(match_type='unmatch').items():
-                        output_name,classified_sheet_name = key
-                        df = self._transform_to_df(unclassified_keyword_list)
-                        df.to_excel(writer, sheet_name=classified_sheet_name, index=False)
-                        
-                
-            return stage2_result
-
-        except Exception as e:
-            err_msg = f'保存分类成功的关键词失败：{e}'
-            if error_callback:
-                error_callback(err_msg)
-            raise Exception(f"保存分类成功的关键词失败：{e}")
-    def process_stage3(self, stage2_results: Dict[str,Dict[str,list]], workflow_rules: models.WorkFlowRules, 
-                      error_callback=None) -> Optional[Dict[str,Dict[str,models.ClassifiedResult]]]:
-        """处理阶段3：分类后处理（Sheet3处理）
-        
-        Args:
-            stage2_results: 阶段2分类结果
-            workflow_rules: 工作流规则字典
-            error_callback: 错误回调函数
-            
-        Returns:
-            更新后的文件路径字典
-        """
-        # 检查是否有Sheet3规则
-        if workflow_rules.get('Sheet3') is None:
-            msg = '找不到Sheet3规则，已经返回'
-            if error_callback:
-                error_callback(msg)
-            return None
-        
-        try:
-            # 获取分类流程3的规则
-            sheet3_rules = workflow_rules.filter_rules(source_sheet_name='Sheet3')
-            sheet3_rules = self.get_level_rules(sheet3_rules,stage2_results,error_callback)
-            stage3_results = {}
-            
-            # 处理每个阶段1文件
-            for output_name, values in stage2_results.items():
-                file_path = values['file_path']
-                if values.get('classified_sheet_name') is None:
-                    continue
-                classified_sheet_name_list = values['classified_sheet_name']
-                # 读取阶段2文件
-                stage2_df = self.excel_handler.read_stage_results(file_path)
-                
-                for classified_sheet_name in classified_sheet_name_list:
-                    
-                    #获取需要分类的关键词
-                    unclassified_keyword = self._process_stage_df(stage2_df,3,classified_sheet_name = classified_sheet_name,error_callback=error_callback)
-
-                    # 获取分类规则
-
-                    output_name_rules = sheet3_rules.filter_rules(output_name=output_name,classified_sheet_name=classified_sheet_name)
-
-                    if output_name_rules:
-                        classified_result = self._get_classified_results(unclassified_keyword,output_name_rules,3,error_callback=error_callback)
-                        # if stage3_results == {}:
-                        #     stage3_results[output_name] = {}
-                        # elif stage3_results.get(output_name) is None:
-                        #     stage3_results[output_name] = {}
-                        # else:
-                        #     stage3_results[output_name][classified_sheet_name] = classified_result
-                        if output_name not in stage3_results:
-                            stage3_results[output_name] = {}
-                        stage3_results[output_name][classified_sheet_name] = classified_result
-                    else:
-                        msg = f'找不到{output_name}的Sheet2规则，已经返回'
-                        if error_callback:
-                            error_callback(msg)
-            return stage3_results
-        except Exception as e:
-            raise Exception(f"处理阶段3失败: {str(e)}")
-    
-      
-    def save_stage3_results(self, stage2_file:Dict[str,Stage2OutputNameDict],stage3_results:Optional[Dict[str,Dict[str,models.ClassifiedResult]]], error_callback=None) -> dict[str, Path]:
-        """保存阶段3分类结果
-        
-        Args:
-            classified_result: 分类结果
-            error_callback: 错误回调函数
-            
-        Returns:
-            保存的文件路径字典
-        """
-        if stage3_results is None:
-            logger.warning('stage3返回了None,可能是没有Sheet3规则')
-            return stage2_file
-
-        try:
-            for output_name,result_dict in stage3_results.items():
-                if result_dict == {}:
-                    continue
-                file_path = stage2_file[output_name]['file_path']
-                logger.debug(f'file_path:{file_path}')
-                
-                for classified_sheet_name,classified_result in result_dict.items():
-                    if classified_result is None:
-                        continue
-                    # 构建 keyword 到 matched_rule 的映射
-                    keyword_to_rule = {
-                        kw.keyword: kw.matched_rule 
-                        for kw in classified_result.filter(classified_conditions={'classified_sheet_name':classified_sheet_name}).classified_keywords
-                    }
-                    self.add_matched_rule_with_pandas(excel_path = file_path,
-                                                      sheet_name = classified_sheet_name,
-                                                      keyword_to_rule = keyword_to_rule,
-                                                      new_column_name = '阶段3'
-                                                      )
-            return stage2_file
-        except  Exception as e:
-            err_msg = f'保存阶段三分类结果失败：{e}'
-            if error_callback:
-                error_callback(err_msg)
-            raise Exception(err_msg)
- 
-    def process_stage_high(self,level:int)->Dict[str,Dict[str,models.ClassifiedResult]]|None:
-        """处理阶段高阶段：工作流三阶段以上
-        Args:
-            level: 分类级别
-        Returns:
-            更新后的文件路径字典
-        """
-        # 检查是否有高阶段规则
-        if self.workflow_rules.get(level) is None:
-            msg = f'找不到{level}规则，已经返回'
-            if self.error_callback:
-                self.error_callback(msg)
-            return None
-        
-        try:
-            # 获取分类流程的规则
-            level_rules = self.workflow_rules.filter_rules(level=level)
-            logger.debug(f'level_before:{level_rules}')
-            level_rules = self.get_level_rules_v1(level_rules,self.process_result_classified_file)
-            parent_rule_name_list = list(set(level_rules.get_parent_rules_name_by_level(level)))
-            logger.debug(f'level:{level}')
-            logger.debug(f'level_rules_after:{level_rules}')
-            logger.debug(f'parent_rule_name_list:{parent_rule_name_list}')
-            level_results = {}
-            
-            # 处理每个阶段1文件
-            for output_name, values in self.process_result_classified_file.items():
-                file_path = values['file_path']
-                if values.get('classified_sheet_name') is None:
-                    continue
-                classified_sheet_name_list = values['classified_sheet_name']
-                # 读取前一阶段分类文件
-                pr_level_dict = self.excel_handler.read_stage_results(file_path)
-
-                for classified_sheet_name in classified_sheet_name_list:
-                    for parent_rule_name in parent_rule_name_list:
-                        #获取需要分类的关键词
-                        
-                        unclassified_keyword = self._process_stage_df(pr_level_dict,level,classified_sheet_name = classified_sheet_name,parent_rule=parent_rule_name)
-                        logger.debug(f'classified_sheet_name:{classified_sheet_name},parent_rule_name:{parent_rule_name},level:{level}，unclassified_keyword:{unclassified_keyword}')
-                        if unclassified_keyword is None:
-                            continue
-
-                        # 获取分类规则
-
-                        output_name_rules = level_rules.filter_rules(output_name=output_name,classified_sheet_name=classified_sheet_name,parent_rule=parent_rule_name)
-
-                        if output_name_rules:
-                            classified_result = self._get_classified_results(unclassified_keyword,output_name_rules,level)
-                            # if stage3_results == {}:
-                            #     stage3_results[output_name] = {}
-                            # elif stage3_results.get(output_name) is None:
-                            #     stage3_results[output_name] = {}
-                            # else:
-                            #     stage3_results[output_name][classified_sheet_name] = classified_result
-                            level_results.setdefault(output_name, {}).setdefault(classified_sheet_name, {})[parent_rule_name] = classified_result
-                        else:
-                            msg = f'找不到{output_name}的Sheet2规则，已经返回'
-                            if self.error_callback:
-                                self.error_callback(msg)
-            return level_results
-        except Exception as e:
-            raise Exception(f"处理阶段3失败: {str(e)}")
-
-
-    def save_stage_high_results(self, level:int,stage_high_result:Dict) -> dict[str, Path]:
-        """保存阶段3分类结果
-        
-        Args:
-            classified_result: 分类结果
-            error_callback: 错误回调函数
-            
-        Returns:
-            保存的文件路径字典
-        """
-        try:
-            classified_result:Optional[models.ClassifiedResult] = None
-            for output_name,result_dict in self.process_result_classified_file.items():
-                if result_dict == {}:
-                    continue
-                file_path = result_dict['file_path']
-
-                
-                for classified_sheet_name,parent_result in stage_high_result.get(output_name,{}).items():
-                    for parent_rule_name,classified_result in parent_result.items():
-                        logger.debug(f'\n\nclassified_sheet_name: {classified_sheet_name}\n\n')
-                        logger.debug(f'\n\nparent_rule_name: {parent_rule_name}\n\n')
-                        logger.debug(f'\n\nclassified_result: {classified_result}\n\n')
-                        if classified_result is None:
-                            continue
-                        # 构建 keyword 到 matched_rule 的映射
-                        filtered_result = classified_result.filter(classified_conditions={'classified_sheet_name':classified_sheet_name,'parent_rule':parent_rule_name})
-                        if filtered_result is None:
-                            continue
-                        keyword_to_rule = {
-                            kw.keyword: kw.matched_rule 
-                            for kw in filtered_result.classified_keywords
-                        }
-                        logger.debug(f'\n\nkeyword_to_rule: {keyword_to_rule}\n\n')
-                        self.add_matched_rule_with_pandas(excel_path = file_path,
-                                                        sheet_name = classified_sheet_name,
-                                                        keyword_to_rule = keyword_to_rule,
-                                                        new_column_name = '阶段'+str(level)
-                                                        )
-            return True
-        except  Exception as e:
-            err_msg = f'保存阶段三分类结果失败：{e}'
-            if self.error_callback:
-                self.error_callback(err_msg)
-            raise Exception(err_msg)
-    def set(self, attr_name:str, data: Any)->Any:
-        '''
-        设置类对象的属性，如果属性不存在，则返回None,如果属性存在，则返回属性值
-        args:
-            attr: 属性名
-            data: 属性值
-        return:
-            属性值 or None
-        '''
-        if hasattr(self, attr_name):
-            setattr(self, attr_name, data)
-            return getattr(self, attr_name)
-        else:
-            err_msg = f"{attr_name} is not a attribute of {self.__class__.__name__}"
-            self.error_callback(err_msg)
-            return None
-    
-    def pre_work(self, rules_file: Path, classification_file: Path)->models.UnclassifiedKeywords:
-        '''
-        执行peocess预处理工作,获取规则和分类文件，获取最大工作流级数
-        由于规则与最大工作流级数后续多次使用，存储在self对象中，未分类关键词只使用本次，因此直接返回
-        args:
-            rules_file: Path,规则文件路径
-            classification_file: Path,分类文件路径
-        return:
-            unclassified_keywords: UnclassifiedKeywords,未分类关键词
-        '''
-        
-        try:
-            # 读取工作流规则
-            workflow_rules = self.excel_handler.read_workflow_rules(rules_file)
-            # 存储规则
-            self.set('workflow_rules', workflow_rules)
-            # 获取最大工作流级数
-            max_process_level = workflow_rules.get_max_level()
-            # 存储最大工作流级数
-            self.set('max_process_level', max_process_level)
-            # 读取待分类的关键词
-            unclassified_keywords = self.excel_handler.read_keyword_file(classification_file)
-            return unclassified_keywords
-        except Exception as e:
-            err_msg = f"Error in pre_work: {e}"
-            self.error_callback(err_msg)
-            raise err_msg
     def get(self, attr_name:str)->Any:
         '''
         获取实例对象属性，如果属性不存在，则返回None
@@ -924,7 +544,141 @@ class WorkFlowProcessor:
         '''
         return self.get('level') <= self.get('max_process_level')
     
-    def process_workflow(self, rules_file: Path, classification_file: Path):
+    def set(self, attr_name:str, data: Any)->Any:
+        '''
+        设置类对象的属性，如果属性不存在，则返回None,如果属性存在，则返回属性值
+        args:
+            attr: 属性名
+            data: 属性值
+        return:
+            属性值 or None
+        '''
+        if hasattr(self, attr_name):
+            setattr(self, attr_name, data)
+            return getattr(self, attr_name)
+        else:
+            err_msg = f"{attr_name} is not a attribute of {self.__class__.__name__}"
+            if self.error_callback:
+                self.error_callback(err_msg)
+            return None
+
+    def process_stage1(self,keywords:models.UnclassifiedKeywords)->models.ProcessTempResult:
+        """处理第一阶段的关键词分类"""
+        try:
+            # 获取一阶段分类规则
+            stage1_rules = cast(models.WorkFlowRules,self.workflow_rules.get(1))
+            # 分类关键词
+            result = self._get_classified_results(keywords,stage1_rules)
+            if result.is_empty(classified_type='classified_keywords'):
+                msg = '第一阶段关键词分类结果为空'
+                if self.error_callback:
+                    self.error_callback(msg)
+                raise Exception(msg)
+            return self.get_process_temp_result.success(status='success',data=result)
+        except Exception as e:
+            msg = f"获取一阶段分类规则失败：{e}"
+            if self.error_callback:
+                self.error_callback(f"获取一阶段分类规则失败：{e}")
+            raise Exception(msg) from e
+
+    def save_stage1_results(self,classified_result:models.ProcessTempResult)->models.ProcessLevelResult:
+        """保存第一阶段分类结果
+        
+        Args:
+            classified_result:models.ProcessTempResult, 分类结果
+                args:
+                    level:int 阶段
+                    status:str 处理结果
+                    data:ClassifiedResult 处理结果
+                    message:str|None 错误信息
+        Returns:
+            models.ProcessLevelResult
+                args:
+                    level:int 阶段
+                    status:Literal["success", "fail", "warning"] 处理结果
+                    next_level:int 下一个阶段名称,9999标识结束
+                    message:str|None 错误信息
+        """
+        temp_process_path_file_list = []
+        try:
+            if classified_result.data is None or classified_result.data.is_empty(classified_type='classified_keywords'):
+                msg = '第一阶段分类结果为空，请检查关键词分类规则是否正确'
+                if self.error_callback:
+                    self.error_callback(msg)
+                raise Exception(msg)
+
+            # 获取分类结果
+            unmatched_keywords = classified_result.data.get_grouped_keywords(group_by='output_name',match_type='unmatch')
+            matched_keywords = classified_result.data.get_grouped_keywords(group_by='output_name',match_type='match')
+            
+            try:
+                # 保存分类失败的关键词
+                if unmatched_keywords:
+                    for output_name, unclassify_keyword_list in unmatched_keywords.items():
+                        output_file = self.output_dir / f'{output_name}_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}.xlsx'
+                        df = self._transform_to_df(unclassify_keyword_list)
+                        self.excel_handler.save_results(df, output_file,sheet_name='Sheet1')
+            except Exception as e:
+                err_msg = f'保存分类失败的关键词失败：{e}'
+                if self.error_callback:
+                    self.error_callback(err_msg)
+                raise Exception(f"保存分类失败的关键词失败：{e}")
+            try:
+                if matched_keywords:
+                    classified_sheet_name = 'Sheet1'
+                    for output_name, matched_keyword_list in matched_keywords.items():
+                        output_file:Path = self.output_dir / f'{output_name}_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}.xlsx'
+                        df = self._transform_to_df(matched_keyword_list)
+                        self.excel_handler.save_results(df, output_file,sheet_name=classified_sheet_name)
+                        level = self.get('level') + 1 
+                        temp_process_path_file_list.append(models.ProcessFilePath(file_path=output_file,level=level,output_name=cast(str,output_name),classified_sheet_name=classified_sheet_name))
+                    self.process_file_path = models.ProcessFilePaths(file_paths=temp_process_path_file_list)
+                msg = '第一阶段分类结果保存成功'
+                if self.error_callback:
+                    self.error_callback(msg)
+                return self.get_process_result.success(status='success',message=msg)
+            except Exception as e:
+                err_msg = f'保存分类成功的关键词失败：{e}'
+                if self.error_callback:
+                    self.error_callback(err_msg)
+                raise Exception(f"保存分类成功的关键词失败：{e}")
+        except Exception as e:
+            err_msg = f'获取分类结果失败：{e}'
+            if self.error_callback:
+                self.error_callback(err_msg)
+            raise Exception(f"获取分类结果失败：{e}")
+
+    
+    def pre_work(self, rules_file: Path, classification_file: Path)->models.UnclassifiedKeywords:
+        '''
+        执行peocess预处理工作,获取规则和分类文件，获取最大工作流级数
+        由于规则与最大工作流级数后续多次使用，存储在self对象中，未分类关键词只使用本次，因此直接返回
+        args:
+            rules_file: Path,规则文件路径
+            classification_file: Path,分类文件路径
+        return:
+            unclassified_keywords: UnclassifiedKeywords,未分类关键词
+        '''
+        
+        try:
+            # 读取工作流规则
+            workflow_rules = self.excel_handler.read_workflow_rules(rules_file)
+            # 存储规则
+            self.set('workflow_rules', workflow_rules)
+            # 获取最大工作流级数
+            max_process_level = workflow_rules.max_process_level()
+            # 存储最大工作流级数
+            self.set('max_process_level', max_process_level)
+            # 读取待分类的关键词
+            unclassified_keywords = self.excel_handler.read_keyword_file(classification_file)
+            return unclassified_keywords
+        except Exception as e:
+            err_msg = f"Error in pre_work: {e}"
+            if self.error_callback:
+                self.error_callback(err_msg)
+            raise Exception(err_msg )from e
+
+    def process_workflow(self, rules_file: Path, classification_file: Path)->models.ProcessLevelResult:
         """处理完整工作流
         
         Args:
@@ -933,54 +687,29 @@ class WorkFlowProcessor:
             error_callback: 错误回调函数
             
         Returns:
-            生成的文件路径字典
+            models.ProcessLevelResult,处理结果
         """
+        stage_result = self.get_process_result.success(status='success',message='process 初始化',next_level=0)
         try:
             
             # 预处理工作，设置self.workflow_rules和获取最初的待分类关键词
             unclassified_keywords = self.pre_work(rules_file=rules_file,classification_file=classification_file)
             if unclassified_keywords.is_empty():
                 err_msg = "执行完预处理工作后，发现待分类关键词为空"
-                self.error_callback(err_msg)
-                return self.get_process_result.success(status='warning',msg=err_msg,message=err_msg,next_level=9999)
+                if self.error_callback:
+                    self.error_callback(err_msg)
+                return self.get_process_result.success(status='warning',message=err_msg,next_level=9999)
             
+            # 执行完预处理 进入下一阶段,由预处理进入阶段一
+            self.add_level()
+
             if self.is_next_process():
                 # 处理阶段1：基础分类,将词分类到各xlsx文件中
-                stage1_results = self.process_stage1(unclassified_keywords)
+                stage1_temp_result = self.process_stage1(unclassified_keywords)
+                stage_result = self.save_stage1_results(stage1_temp_result)
+
+            return stage_result
             
-            # 保存阶段1结果
-            stage1_files = self.save_stage1_results(stage1_results)
-            self.process_result_file = stage1_files
-            result = {'stage':1,'result':stage1_files}
-            stage += 1
-            max_level = workflow_rules.get_max_level()
-            logger.debug(f'max_level: {max_level}')
-            if stage <= max_level:
-                # 处理阶段2：将分类细分到各sheet
-                stage2_results = self.process_stage2(stage1_files, workflow_rules, error_callback)
-                # 保存阶段2结果
-                stage2_files = self.save_stage2_results(stage1_files, stage2_results, error_callback)
-                result = {'stage':2,'result':stage2_files}
-                stage += 1
-                logger.debug(f'当前工作流层级: {stage},max_level: {max_level}')
-            if stage <= max_level:
-                self.process_result_classified_file = self.excel_handler.read_stage_classified_sheet_name(self.process_result_file)
-                logger.debug(f'self.process_result_classified_file:{self.process_result_classified_file}')
-                # 处理阶段3：分类后处理（Sheet3处理）
-                stage3_results = self.process_stage3(stage2_files, workflow_rules, error_callback)
-                
-                stage3_file = self.save_stage3_results(stage2_file=stage2_files,stage3_results=stage3_results,error_callback=error_callback)
-                result = {'stage':3,'result':stage3_file}
-                stage += 1
-                logger.debug(f'当前工作流层级: {stage},max_level: {max_level}')
-            while stage <= max_level:
-                stage_result = self.process_stage_high(stage)
-                stage_save_result = self.save_stage_high_results(stage,stage_result)
-                result = {'stage':stage,'result':stage_save_result}
-                stage += 1
-                logger.debug(f'stage_result:{stage_result}')
-            logger.debug(f'result:{result}')
-            return result
             
 
         except Exception as e:

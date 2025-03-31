@@ -4,7 +4,7 @@ from typing import Callable, Optional, Dict, Any
 
 # 创建根日志器
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 # 创建控制台处理器
 console_handler = logging.StreamHandler(sys.stdout)
