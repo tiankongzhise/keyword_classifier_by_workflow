@@ -170,7 +170,7 @@ class ExcelHandler:
             
             # 清理数据
             keywords = df['关键词'].dropna().astype(str).tolist()
-            return UnclassifiedKeywords(data=keywords)
+            return UnclassifiedKeywords(data=keywords,levle=0,error_callback=self.error_callback)
         except Exception as e:
             raise Exception(f"读取待分类文件失败: {str(e)}")
     def read_stage_results(self, file_path: Path) -> Dict[str,pd.DataFrame]:

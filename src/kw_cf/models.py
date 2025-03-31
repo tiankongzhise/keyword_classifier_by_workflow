@@ -1,5 +1,6 @@
 from pydantic import BaseModel, field_validator, Field,ValidationInfo,model_validator
 from .logger_config import logger
+from pathlib import Path
 
 from typing import List, Optional, Callable, Any,Literal,Dict
 
@@ -103,7 +104,25 @@ def _preserve_order_deduplicate(lst: List[str]) -> List[str]:
 
 
 class UnclassifiedKeywords(BaseModel):
+    '''
+    未分类关键词,对传入的未分类关键词进行预处理,去除不可见字符串，空值过滤,并保序去重
+    对来源进行验证，当level为0时，不验证来源文件和sheet,因为level为0时，输入为用户手动选择的待分类文件，验证无意义。
+    当level>=1,需要有来源文件，标明来自哪个分类文件
+    当level>=2,需要有来源sheet,标明来自哪个分类sheet
+
+    args:
+        data:List[str] 未分类关键词
+        souce_file_name:str|None 关键词来源文件名称
+        souce_sheet_name:str|None 关键词来源sheet名称
+        level:工作流层级，从0开始，0表示最初的待分类关键词
+        error_callback:错误信息回调函数
+    return:
+        UnclassifiedKeywords:未分类关键词
+    '''
     data: List[str] # 未分类关键词
+    souce_file_name: str|None = Field(None, min_length=1, description="关键词来源文件名称" ) # 关键词来源文件名称
+    souce_sheet_name: str | None = Field(None, min_length=1, description="关键词来源sheet名称" )# 关键词来源sheet名称
+    level: int = Field(..., ge=0, description="未分类关键词层级" ) # 未分类关键词层级
     error_callback: Optional[Callable[..., Any]] = Field(
         None, exclude=True, description="错误信息回调函数"
     )
@@ -137,9 +156,48 @@ class UnclassifiedKeywords(BaseModel):
 
         return _preserve_order_deduplicate(non_empty)
 
+    def empty(self) -> bool:
+        """判断是否为空"""
+
+        return not bool(self.data)
+    
+    @model_validator(mode = 'after')
+    def validate_rules(self)->None:
+        """验证规则"""
+        err_msg = []
+        if self.level >= 1 and not self.output_name:
+            err_msg.append(f"未分类关键词 {self.data} 的层级大于1，但没有指定来源文件名称")
+        if self.level >= 2 and not self.souce_sheet_name:
+            err_msg.append(f"未分类关键词 {self.data} 的层级大于等于2，但没有指定来源sheet名称")
+        if err_msg:
+            if self.error_callback:
+                self.error_callback("\n".join(err_msg))
+            raise ValueError("\n".join(err_msg))
+        return self
+    
     class Config:
         validate_assignment = True  # 允许在赋值时触发验证
 
+
+class ClassifiedWord(BaseModel):
+    '''关键词分类中间状态
+    args:
+        keyword:str 关键词
+        matched_rule:str 匹配的规则,未匹配任何规则是为''
+        souce_file_name:str|None 关键词来源文件名称
+        souce_sheet_name:str|None 关键词来源sheet名称
+        level:int 工作流层级，从0开始，0表示最初的待分类关键词
+    return:
+        ClassifiedWord:关键词分类中间状态
+    '''
+    keyword: str
+    matched_rule:str
+    souce_file_name:str|None = Field(None,min_length=1,description="关键词来源文件名称")# 关键词来源文件名称
+    souce_sheet_name:str|None = Field(None,min_length=1,description="关键词来源sheet名称")# 关键词来源sheet名称
+    level:int = Field(...,ge=0,description="关键词层级")# 工作流层级层级
+    error_callback: Optional[Callable[..., Any]] = Field(
+        None, exclude=True, description="错误信息回调函数"
+    )
 
 class SourceRules(BaseModel):
     """增强版规则模型（包含预处理、去重、空值过滤）"""
@@ -188,10 +246,6 @@ class SourceRules(BaseModel):
     class Config:
         validate_assignment = True
 
-class ClassifiedWord(BaseModel):
-    '''中间状态'''
-    keyword: str
-    matched_rule:str
 
 class WorkFlowRule(BaseModel):
     '''
@@ -262,7 +316,7 @@ class WorkFlowRules(BaseModel):
         rules = [rule for rule in self.rules if rule.parent_rule == parent_rule]
         if rules:
             return WorkFlowRules(rules=rules)
-    def get_max_level(self)->int:
+    def max_process_level(self)->int:
         """获取最大层级"""
         return max([rule.level for rule in self.rules])
 
@@ -395,6 +449,8 @@ class ClassifiedKeyword(BaseModel):
         classified_sheet_name:输出sheet名称
         rule_tag:规则标签
         parent_rule:父级规则
+        parent_rule_column:父级规则列名
+        rule_tag_column:规则标签列名
     '''
     level:int = Field(...,ge=1,description="分类层级")
     keyword:str = Field(...,min_length=1,description="关键词")
@@ -403,8 +459,8 @@ class ClassifiedKeyword(BaseModel):
     classified_sheet_name:str|None = Field(None,min_length=1,description="输出sheet名称")
     parent_rule:str|None = Field(None,min_length=1,description="父级规则")
     rule_tag:str|None = Field(None,min_length=1,description="规则标签")
-    parent_rule_columon:str|None = Field(None,min_length=1,description="父级规则列名")
-    rule_tag_columon:str|None = Field(None,min_length=1,description="规则标签列名")
+    parent_rule_column:str|None = Field(None,min_length=1,description="父级规则列名")
+    rule_tag_column:str|None = Field(None,min_length=1,description="规则标签列名")
 
 class UnMatchedKeyword(BaseModel):
     '''
@@ -426,6 +482,7 @@ class UnMatchedKeyword(BaseModel):
     rule_tag:None = Field(None,description="容错，防止groupby报错")
     parent_rule_columon:None = Field(None,description="容错，防止groupby报错")
     rule_tag_columon:None = Field(None,description="容错，防止groupby报错")
+    source_sheet_name:str = Field(...,min_length=1,description="来源工作表名称")
 
 class ClassifiedResult(BaseModel):
     classified_keywords: List[ClassifiedKeyword] = Field(..., description="分类结果")
@@ -547,18 +604,111 @@ class ClassifiedResult(BaseModel):
             classified_keywords=filtered_classified,
             unclassified_keywords=filtered_unclassified
         )
+    def is_empty(self,classified_type:Literal['classified_keywords','unclassified_keywords']) -> bool:
+        """判断分类结果是否为空"""
+        return not getattr(self,classified_type)
 
-class StageSaveResult(BaseModel):
+class ProcessFilePath(BaseModel):
     '''
     args:
-        stage:int 阶段
+        output_name:输出文件名称
+        classified_sheet_name:输出sheet名称
+        file_path:文件路径
+    '''
+    level:int = Field(...,ge=1,description="分类层级")# 分类层级
+    output_name:str = Field(...,min_length=1,description="输出文件名称")# 输出文件名称
+    file_path:Path = Field(...,min_length=1,description="文件路径")# 文件路径
+    classified_sheet_name:str|None = Field(None,min_length=1,description="输出sheet名称")# 输出sheet名称
+    
+
+    @model_validator(mode = 'after')    
+    def validate_classified_sheet_name(self):
+        """验证分类sheet名称"""
+        if self.classified_sheet_name is None and self.level > 1:
+            raise ValueError(f"output_name:{self.output_name},file_path:{self.file_path},分类层级为{self.level}，但没有指定分类sheet名称")
+        return self
+    
+class ProcessFilePaths(BaseModel):
+    '''
+    args:
+        file_paths:文件路径列表
+    '''
+    file_paths:List[ProcessFilePath] = Field(...,min_length=1,description="分类结果列表")# 文件路径列表
+
+    def filter(self,**conditions:Any)->'ProcessFilePaths':
+        """
+        返回满足任意条件组合的 ProcessFilePaths 列表。
+        Conditions:
+            output_name: 输出文件名称
+            classified_sheet_name: 输出sheet名称
+            level: 分类层级
+        Args:
+            **conditions: 条件字典，键为 ProcessFilePath 的字段名，值为期望的值或条件函数。
+                         例如: `output_name="Sheet1"` 或 `level=lambda x: x > 2`
+        Returns:
+            ProcessFilePaths: 满足条件的ProcessFilePaths
+        """
+        filtered_file_paths = []
+        for file_path in self.file_paths:
+            match = True
+            for field, condition in conditions.items():
+                if not hasattr(file_path, field):
+                    raise ValueError(f"Invalid field: '{field}' is not a valid field of ProcessFilePath")
+
+                value = getattr(file_path, field)
+                # 如果条件是函数（如 lambda），则调用它进行判断
+                if callable(condition):
+                    if not condition(value):
+                        match = False
+                        break
+                # 否则直接比较值
+                elif value != condition:
+                    match = False
+                    break
+            if match:
+                filtered_file_paths.append(file_path)
+        return ProcessFilePaths(file_paths=filtered_file_paths) if filtered_file_paths else None
+    
+    def empty(self)->bool:
+        """判断是否为空"""
+        return len(self.file_paths) == 0
+    
+
+class ProcessTempResult(BaseModel):
+    '''
+    args:
+        level:int 阶段
         status:str 处理结果
-        next_stage:int 下一个阶段名称
-        file_path:dict 文件路径
+        data:ClassifiedResult 处理结果
         message:str|None 错误信息
     '''
-    stage:int = Field(...,ge=1,description="阶段")# 阶段
+    level:int = Field(...,ge=1,description="分类层级")# 分类层级
     status:Literal["success", "fail", "warning"] = Field(...,description="处理结果")# 处理结果
-    next_stage:int = Field(...,ge=1,description="下一个阶段名称")# 下一个阶段名称
-    file_path:Dict = Field(...,description="文件路径")# 文件路径
+    data:ClassifiedResult = Field(...,description="处理结果")# 处理结果
     message:str|None = Field(None,description="错误信息")# 错误信息
+    
+    @model_validator(mode = 'after')
+    def validate_rules(self):
+        """验证规则"""
+        if self.status != "success" and (self.message is None or self.message == ""):
+            raise ValueError(f"level:{self.level},status:{self.status},message:{self.message},请填写错误信息")
+
+class ProcessLevelResult(BaseModel):
+    '''
+    args:
+        level:int 阶段
+        status:Literal["success", "fail", "warning"]  处理结果
+        next_level:int 下一个阶段名称,9999标识结束
+        message:str|None 错误信息
+    '''
+    level:int = Field(...,ge=0,description="阶段")# 阶段
+    status:Literal["success", "fail", "warning"] = Field(...,description="处理结果")# 处理结果
+    next_level:int = Field(...,ge=1,description="下一个阶段名称")# 下一个阶段名称
+    message:str|None = Field(None,description="错误信息")# 错误信息
+
+    @model_validator(mode = 'after')
+    def validate_rules(self):
+        """验证规则"""
+        if self.status == "fail" and (self.message is None or self.message == ""):
+            raise ValueError("处理结果为fail时，必须提供错误信息")
+        return self

@@ -133,7 +133,7 @@ class KeywordClassifier:
 
         return parse_errors  # 返回解析错误列表
 
-    def classify_keywords(self, keywords: UnclassifiedKeywords, error_callback=None)->list[ClassifiedWord]:
+    def classify_keywords(self, keywords: UnclassifiedKeywords)->list[ClassifiedWord]:
         """对关键词进行分类（单进程版本）"""
 
         results = []
@@ -164,6 +164,10 @@ class KeywordClassifier:
                     matched_rule=self.separator.join(matched_rules)
                     if matched_rules
                     else "",
+                    souce_file_name=keywords.souce_file_name,
+                    level=keywords.level,
+                    souce_sheet_name=keywords.source_sheet_name,
+                    error_callback=self.error_callback,
                 )
             )
         return results

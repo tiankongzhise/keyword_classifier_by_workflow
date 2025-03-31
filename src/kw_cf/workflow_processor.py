@@ -3,30 +3,63 @@ from pathlib import Path
 from .keyword_classifier import KeywordClassifier
 from .excel_handler import ExcelHandler
 from .logger_config import logger
-from typing import List,Dict,TypedDict,Optional,Callable,cast
+from typing import List,Dict,Optional,Callable,cast,Any,Literal
 from . import models
 import pandas as pd
 import datetime
 
 
-class StageOneRestsultTypeDict(TypedDict):
-    code:str
-    level:int
-    next_stage:int
-    file_path:Dict[str,Path]
-    message:str
-
+class GetProcessResult(object):
+    def __init__(self,parent_self:'WorkFlowProcessor'):
+        self.parent_self = parent_self
     
-class StageTwoRestsultTypeDict(TypedDict):
-    ...
-class StageThreeRestsultTypeDict(TypedDict):
-    ...
-class StageHighResultTypeDict(TypedDict):
-    ...
-class Stage2OutputNameDict(TypedDict):
-    file_path:str
-    classified_sheet_name:List[str]
     
+    def success(self,
+                status:Literal["success", "warning"],
+                message:str|None = None,
+                next_level:Optional[int] = None,
+                )->models.ProcessResult:
+        '''
+        封装返回处理成功的结果,会自动从实例中读取level，如果未设置下一级则自动设置为当前level+1，并且会更新实例的level
+        args:
+            status: 处理状态
+            message: 处理结果信息
+            next_level: 下一级工作流运行长度 9999标识结束，如果未输入，则为当前level+1
+        reuturn:
+            ProcessResult: 处理结果
+        '''
+        level = self.parent_self.get('level')
+        self.parent_self.add_level()
+        if next_level is None:
+            next_level = self.parent_self.get('level')
+        
+        return models.ProcessResult(
+                level=level,
+                status=status,
+                message=message,
+                next_level=next_level
+            )
+    def fail(self,
+             message:str,
+             )->models.ProcessResult:
+        '''
+        封装返回处理失败的结果,会自动从实例中读取level，并自动设置下一级level为9999，并且会更新实例的level
+        args:
+            status: 处理状态
+            message: 处理结果信息
+        reuturn:
+            ProcessResult: 处理结果
+        '''
+        level = self.parent_self.get('level')
+        self.parent_self.set('level',9999)
+        return models.ProcessResult(
+            level=level,
+            status='fail',
+            message=message,
+            next_level=9999  
+        )
+             
+             
     
 
 class WorkFlowProcessor:
@@ -41,15 +74,17 @@ class WorkFlowProcessor:
             classifier: 关键词分类器实例，如果为None则创建新实例
             excel_handler: Excel处理器实例，如果为None则创建新实例
         """
-        self.excel_handler:ExcelHandler = excel_handler or ExcelHandler(error_callback)
-        self.classifier:KeywordClassifier = keyword_classifier or KeywordClassifier(error_callback=error_callback)
-        self.error_callback:Optional[Callable] = error_callback
-        self.workflow_rules:Optional[models.WorkFlowRules] = None
-        self.process_result_file:Optional[Dict[str,pd.DataFrame]] = None
-        self.process_result_classified_file:Optional[Dict[str,Dict[str,List[str]|str]]] = None
+        self.excel_handler:ExcelHandler = excel_handler or ExcelHandler(error_callback) # Excel处理器实例
+        self.classifier:KeywordClassifier = keyword_classifier or KeywordClassifier(error_callback=error_callback) # 创建关键词分类器实例
+        self.get_process_result = GetProcessResult(self) # 封装返回处理结果的函数
+        self.error_callback:Optional[Callable] = error_callback # 错误回调函数
+        self.workflow_rules:Optional[models.WorkFlowRules] = None # 全部工作流规则
+        self.process_file_path:models.ProcessFilePaths = None #包含分类sheet的运行结果
+        self.max_process_level:int = 0 # 工作流运行长度
+        self.level:int = 0 # 当前工作流运行长度
 
-        self.output_dir = Path('./工作流结果')
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir = Path('./工作流结果')# 输出文件夹
+        self.output_dir.mkdir(parents=True, exist_ok=True)# 创建文件夹
     
     
     def _transfrom_unmathced_keywords(self,unmatched_keywords:List[models.UnMatchedKeyword])->pd.DataFrame:
@@ -85,7 +120,7 @@ class WorkFlowProcessor:
         return map_func[type(data[0])](data)
         
         
-    def _trans_words_to_cassified_result(self,classify_result:List[models.ClassifiedWord],mapping_dict:dict)->Optional[models.ClassifiedResult]:
+    def _trans_words_to_cassified_result(self,classify_result:List[models.ClassifiedWord],workflow_rules:models.WorkFlowRules)->Optional[models.ClassifiedResult]:
         classified_keywords = []
         unclassified_keywords = []
         try:
@@ -93,60 +128,86 @@ class WorkFlowProcessor:
             for temp in classify_result:
                 keyword = temp.keyword
                 matched_rules = temp.matched_rule
+  
                 temp_dict = {}
+                
+                # 确定映射属性
+                rule_item = workflow_rules.filter_rules(rule=matched_rules).rules
+                if rule_item == []:
+                    msg = f'_trans_words_to_cassified_result匹配异常，关键词匹配了一个分类工作流中不存在的规则。temp:{temp},workflow_rules:{workflow_rules}'
+                    if self.error_callback:
+                        self.error_callback(msg)
+                    raise Exception(msg)
+                rule_item = rule_item[0]
+                workflow_level = rule_item.level
+                output_name = rule_item.output_name
+                classified_sheet_name = rule_item.classified_sheet_name
+                parent_rule = rule_item.parent_rule
+                rule_tage = rule_item.rule_tag
+                parent_rule_column = f'阶段{workflow_level-1}父级规则'
+                rule_tag_column = f'阶段{workflow_level}规则标签'
+                
                 if matched_rules:
+
+                    
+                    #创建映射字典
                     temp_dict = {
-                        'level':mapping_dict['level'],
+                        'level':workflow_level,
                         'keyword':keyword,
                         'matched_rule':matched_rules,
-                        'output_name':mapping_dict[matched_rules].get('output_name'),
-                        'classified_sheet_name':mapping_dict[matched_rules].get('classified_sheet_name'),
-                        'parent_rule':mapping_dict[matched_rules].get('parent_rule')
+                        'output_name':output_name,
+                        'classified_sheet_name':classified_sheet_name,
+                        'parent_rule':parent_rule,
+                        'rule_tage':rule_tage,
+                        'parent_rule_column':parent_rule_column,
+                        'rule_tag_column':rule_tag_column,
                     }
                     classified_keywords.append(
                         models.ClassifiedKeyword(**temp_dict))
                 else:
-                    if mapping_dict.get('level') == 1:
-                        temp_dict = {
-                            'level':mapping_dict['level'],
-                            'keyword':keyword,
-                            'output_name':'未匹配关键词',
-                            'classified_sheet_name':'Sheet1'
-                        }
-
-                    else:
-                        output_name = list(mapping_dict.values())[1].get('output_name')
-                        for key,value in mapping_dict.items():
-                            if isinstance(value,dict):
-                                if output_name != value.get('output_name'):
-                                    msg = f'异常情况，传入的隐射关系存在多个来源文件夹,请检查规则映射关系{mapping_dict},output_name:{output_name},value:{value.get("output_name")}'
-                                    raise Exception(msg)
-                        temp_dict = {
-                            'level':mapping_dict['level'],
-                            'keyword':keyword,
-                            'output_name':output_name,
-                            'classified_sheet_name':'未匹配关键词'
-                        }
+                    # 创建映射关系
+                    source_sheet_name = temp.source_sheet_name
+                    souce_file_name = temp.source_file_name
+                    process_level = temp.level
+                    temp_dict = {
+                        'level':process_level,
+                        'keyword':keyword,
+                        'output_name':souce_file_name or '未分类关键词',
+                        'classified_sheet_name':'Sheet1' if souce_file_name is None else '未匹配关键词' ,
+                        'source_sheet_name':source_sheet_name
+                    }
                     unclassified_keywords.append(
                             models.UnMatchedKeyword( **temp_dict))
             if classified_keywords:
                 return models.ClassifiedResult(classified_keywords=classified_keywords,unclassified_keywords=unclassified_keywords)
         except Exception as e:
-            msg = f"分类结果转换出错: {e},\nmapping_dict: {mapping_dict},\nclassified_keywords:{classified_keywords},\nunclassified_keywords:{unclassified_keywords}"
+            msg = f"分类结果转换出错: {e},\nworkflow_rules: {workflow_rules},\nclassified_keywords:{classified_keywords},\nunclassified_keywords:{unclassified_keywords}"
+            if self.error_callback:
+                self.error_callback(msg)
+            raise Exception(msg) from e
+        
+    def _create_mapping_dict(self,workflow_rules:models.WorkFlowRules)->dict:
+        try:
+            mapping_dict = {}
+            
+            mapping_dict['level'] = self.get('level')
+            for rule in workflow_rules.rules:
+                mapping_dict[rule.rule] = {
+                    'output_name':rule.output_name,
+                    'classified_sheet_name':rule.classified_sheet_name,
+                    'parent_rule':rule.parent_rule,
+                    'rule_tage':rule.rule_tag
+                }
+            return mapping_dict
+        except Exception as e:
+            msg = f"创建映射字典出错: {e},\nworkflow_rules:{workflow_rules}"
+            if self.error_callback:
+                self.error_callback(msg)
             raise Exception(msg)
-    def _create_mapping_dict(self,workflow_rules:models.WorkFlowRules,level:int)->dict:
-        mapping_dict = {}
-        mapping_dict['level'] = level
-        for rule in workflow_rules.rules:
-            mapping_dict[rule.rule] = {
-                'output_name':rule.output_name,
-                'classified_sheet_name':rule.classified_sheet_name,
-                'parent_rule':rule.parent_rule
-            }
-        return mapping_dict
 
-    def _get_classified_results(self,unclassified_keywords:models.UnclassifiedKeywords,workflow_rules:models.WorkFlowRules,level:int,
-                            error_callback=None)->Optional[models.ClassifiedResult]:
+    def _get_classified_results(self,
+                                unclassified_keywords:models.UnclassifiedKeywords,
+                                workflow_rules:models.WorkFlowRules)->Optional[models.ClassifiedResult]:
         """关键词分类
         
         Args:
@@ -157,22 +218,26 @@ class WorkFlowProcessor:
         Returns:
             ClassifiedResult:分类结果
         """
-        # 创建规则与输出映射字典
-        mapping_dict = self._create_mapping_dict(workflow_rules,level)
-        
-        # 获取分类规则列表，方便后续处理
-        rules = workflow_rules.to_rules_list()
-        
-        # 设置分类规则
-        self.classifier.set_rules(models.SourceRules(data=rules,error_callback=error_callback))
-        
-        # 分类关键词
-        classify_result = self.classifier.classify_keywords(unclassified_keywords)
-        
-        # 转换分类结果
-        classified_reuslt =  self._trans_words_to_cassified_result(classify_result,mapping_dict)
-        
-        return classified_reuslt
+        try:
+            
+            # 获取分类规则列表，方便后续处理
+            rules = workflow_rules.to_rules_list()
+            
+            # 设置分类规则
+            self.classifier.set_rules(models.SourceRules(data=rules,error_callback=self.error_callback))
+            
+            # 分类关键词
+            classify_result = self.classifier.classify_keywords(unclassified_keywords)
+            
+            # 转换分类结果
+            classified_reuslt =  self._trans_words_to_cassified_result(classify_result,workflow_rules)
+            
+            return classified_reuslt
+        except Exception as e:
+            msg = f"_get_classified_results出错: {e},\nunclassified_keywords:{unclassified_keywords},\nworkflow_rules:{workflow_rules}"
+            if self.error_callback:
+                self.error_callback(msg)
+            raise Exception(msg) from e
         
     def _process_stage_df(self,pipeline_data:Dict[str,pd.DataFrame],level:int,**kwargs)->models.UnclassifiedKeywords:
         mask = None
@@ -425,19 +490,13 @@ class WorkFlowProcessor:
             temp_list.extend(special_rules.rules)
         return models.WorkFlowRules(rules=temp_list)
     
-    def process_stage1(self,keywords:models.UnclassifiedKeywords,workflow_rules:models.WorkFlowRules,
-                       error_callback=None)->models.ClassifiedResult:
+    def process_stage1(self,keywords:models.UnclassifiedKeywords)->models.ClassifiedResult:
         """处理第一阶段的关键词分类"""
         try:
             # 获取一阶段分类规则
-            stage1_rules = workflow_rules.get_rules_by_level(1)
-            if stage1_rules is None:
-                msg = '第一阶段关键词分类规则为空'
-                if error_callback:
-                    error_callback(msg)
-                raise Exception(msg)
+            stage1_rules = self.workflow_rules.get(1)
             # 分类关键词
-            result = self._get_classified_results(keywords,stage1_rules,1,error_callback = error_callback)
+            result = self._get_classified_results(keywords,stage1_rules)
             if result is None:
                 msg = '第一阶段关键词分类结果为空'
                 if error_callback:
@@ -801,8 +860,71 @@ class WorkFlowProcessor:
             if self.error_callback:
                 self.error_callback(err_msg)
             raise Exception(err_msg)
-
-    def process_workflow(self, rules_file: Path, classification_file: Path, error_callback=None):
+    def set(self, attr_name:str, data: Any)->Any:
+        '''
+        设置类对象的属性，如果属性不存在，则返回None,如果属性存在，则返回属性值
+        args:
+            attr: 属性名
+            data: 属性值
+        return:
+            属性值 or None
+        '''
+        if hasattr(self, attr_name):
+            setattr(self, attr_name, data)
+            return getattr(self, attr_name)
+        else:
+            err_msg = f"{attr_name} is not a attribute of {self.__class__.__name__}"
+            self.error_callback(err_msg)
+            return None
+    
+    def pre_work(self, rules_file: Path, classification_file: Path)->models.UnclassifiedKeywords:
+        '''
+        执行peocess预处理工作,获取规则和分类文件，获取最大工作流级数
+        由于规则与最大工作流级数后续多次使用，存储在self对象中，未分类关键词只使用本次，因此直接返回
+        args:
+            rules_file: Path,规则文件路径
+            classification_file: Path,分类文件路径
+        return:
+            unclassified_keywords: UnclassifiedKeywords,未分类关键词
+        '''
+        
+        try:
+            # 读取工作流规则
+            workflow_rules = self.excel_handler.read_workflow_rules(rules_file)
+            # 存储规则
+            self.set('workflow_rules', workflow_rules)
+            # 获取最大工作流级数
+            max_process_level = workflow_rules.get_max_level()
+            # 存储最大工作流级数
+            self.set('max_process_level', max_process_level)
+            # 读取待分类的关键词
+            unclassified_keywords = self.excel_handler.read_keyword_file(classification_file)
+            return unclassified_keywords
+        except Exception as e:
+            err_msg = f"Error in pre_work: {e}"
+            self.error_callback(err_msg)
+            raise err_msg
+    def get(self, attr_name:str)->Any:
+        '''
+        获取实例对象属性，如果属性不存在，则返回None
+        args:
+            attr: 属性名
+        return:
+            属性值 or None
+        '''
+        if hasattr(self, attr_name):
+            return getattr(self, attr_name)
+    
+    def add_level(self)->None:
+        self.set('level',self.get('level')+1)
+    
+    def is_next_process(self)->bool:
+        '''
+        判断是否需要继续处理
+        '''
+        return self.get('level') <= self.get('max_process_level')
+    
+    def process_workflow(self, rules_file: Path, classification_file: Path):
         """处理完整工作流
         
         Args:
@@ -814,16 +936,17 @@ class WorkFlowProcessor:
             生成的文件路径字典
         """
         try:
-            result = {}
-            stage = 1
-            # 读取工作流规则
-            workflow_rules = self.excel_handler.read_workflow_rules(rules_file)
-            self.workflow_rules = workflow_rules
-            logger.debug(f'self.workflow_rules: {self.workflow_rules}')    
-            # 读取待分类文件
-            unclassified_keywords = self.excel_handler.read_keyword_file(classification_file)
-            # 处理阶段1：基础分类,将词分类到各xlsx文件中
-            stage1_results = self.process_stage1(unclassified_keywords, workflow_rules, error_callback)
+            
+            # 预处理工作，设置self.workflow_rules和获取最初的待分类关键词
+            unclassified_keywords = self.pre_work(rules_file=rules_file,classification_file=classification_file)
+            if unclassified_keywords.empty():
+                err_msg = "执行完预处理工作后，发现待分类关键词为空"
+                self.error_callback(err_msg)
+                return self.get_process_result.success(status='warning',msg=err_msg,message=err_msg,next_level=9999)
+            
+            if self.is_next_process():
+                # 处理阶段1：基础分类,将词分类到各xlsx文件中
+                stage1_results = self.process_stage1(unclassified_keywords)
             
             # 保存阶段1结果
             stage1_files = self.save_stage1_results(stage1_results)
@@ -862,6 +985,6 @@ class WorkFlowProcessor:
 
         except Exception as e:
             err_msg = f'处理完整工作流失败：{e}'
-            if error_callback:
-                error_callback(err_msg)
+            if self.error_callback:
+                self.error_callback(err_msg)
             raise Exception(f"处理完整工作流失败：{e}")
