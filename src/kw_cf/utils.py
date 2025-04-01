@@ -1,5 +1,5 @@
 from . import models
-from typing import List,TYPE_CHECKING
+from typing import List,TYPE_CHECKING,Dict
 import pandas as pd
 
 if TYPE_CHECKING:
@@ -43,7 +43,31 @@ class WorkFlowProcessorUtil(object):
         }
         return map_func[type(data[0])](data)
         
-
+    def fromat_matched_rule_dict(self,rule_item:models.WorkFlowRule)->Dict:
+        result = {
+        'level': rule_item.level,
+        'output_name' : rule_item.output_name,
+        'matched_rule': rule_item.rule
+        }
+        if result['level'] >= 2:
+            result['classified_sheet_name'] = rule_item.classified_sheet_name
+        if result['level'] >= 3:
+             result['rule_tage'] = rule_item.rule_tag
+             result['rule_tag_column'] = f'阶段{result['level']}规则标签',
+        if result['level'] >= 4:
+            result['parent_rule'] = rule_item.parent_rule
+            result['parent_rule_column'] = f'阶段{result['level']-1}父级规则'
+        return result
+    def format_unmatched_keyword_dict(self,keyword_item:models.ClassifiedWord)->Dict:
+        result = {
+            'level':keyword_item.level,
+            'keyword':keyword_item.keyword,
+            'output_name':keyword_item.source_file_name or '未分类关键词',
+            'classified_sheet_name':'Sheet1' if keyword_item.source_file_name is None else '未匹配关键词' ,
+            'source_sheet_name':keyword_item.source_sheet_name or 'Sheet1'
+        }
+        return result
+    
     def trans_words_to_cassified_result(self,classify_result:List[models.ClassifiedWord],workflow_rules:models.WorkFlowRules)->models.ClassifiedResult:
         classified_keywords = []
         unclassified_keywords = []
@@ -62,50 +86,19 @@ class WorkFlowProcessorUtil(object):
                     # 确定映射属性
                     rule_item = workflow_rules.filter_rules(rule=matched_rules)
                     if rule_item is None:
-                        msg = f'_trans_words_to_cassified_result匹配异常，关键词匹配了一个分类工作流中不存在的规则。temp:{temp},workflow_rules:{workflow_rules}'
+                        msg = f'trans_words_to_cassified_result匹配异常，关键词匹配了一个分类工作流中不存在的规则。temp:{temp},workflow_rules:{workflow_rules}'
                         if self.error_callback:
                             self.error_callback(msg)
                         raise Exception(msg)
-                    rule_item = rule_item.rules
-                    if rule_item == []:
-                        msg = f'_trans_words_to_cassified_result匹配异常，关键词匹配了一个分类工作流中不存在的规则。temp:{temp},workflow_rules:{workflow_rules}'
-                        if self.error_callback:
-                            self.error_callback(msg)
-                        raise Exception(msg)
-                    rule_item = rule_item[0]
-                    workflow_level = rule_item.level
-                    output_name = rule_item.output_name
-                    classified_sheet_name = rule_item.classified_sheet_name
-                    parent_rule = rule_item.parent_rule
-                    rule_tage = rule_item.rule_tag
-                    parent_rule_column = f'阶段{workflow_level-1}父级规则'
-                    rule_tag_column = f'阶段{workflow_level}规则标签'
+
                     #创建映射字典
-                    temp_dict = {
-                        'level':workflow_level,
-                        'keyword':keyword,
-                        'matched_rule':matched_rules,
-                        'output_name':output_name,
-                        'classified_sheet_name':classified_sheet_name,
-                        'parent_rule':parent_rule,
-                        'rule_tage':rule_tage,
-                        'parent_rule_column':parent_rule_column,
-                        'rule_tag_column':rule_tag_column,
-                    }
+                    temp_dict = self.fromat_matched_rule_dict(rule_item.rules[0])
+                    temp_dict['keyword'] = keyword    
                     classified_keywords.append(
                         models.ClassifiedKeyword(**temp_dict))
                 else:
                     # 创建映射关系
-                    source_sheet_name = temp.source_sheet_name
-                    souce_file_name = temp.source_file_name
-                    process_level = temp.level
-                    temp_dict = {
-                        'level':process_level,
-                        'keyword':keyword,
-                        'output_name':souce_file_name or '未分类关键词',
-                        'classified_sheet_name':'Sheet1' if souce_file_name is None else '未匹配关键词' ,
-                        'source_sheet_name':source_sheet_name or 'Sheet1'
-                    }
+                    temp_dict = self.format_unmatched_keyword_dict(temp)
                     unclassified_keywords.append(
                             models.UnMatchedKeyword( **temp_dict))
 

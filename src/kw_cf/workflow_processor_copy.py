@@ -105,11 +105,7 @@ class GetProcessTempResult(object):
             data=data
         )
                           
-
-
-
-    
-
+                          
 class WorkFlowProcessor:
     def __init__(self,
                  excel_handler: ExcelHandler | None = None,
