@@ -164,9 +164,9 @@ class KeywordClassifier:
                     matched_rule=self.separator.join(matched_rules)
                     if matched_rules
                     else "",
-                    souce_file_name=keywords.source_file_name,
+                    source_file_name=keywords.source_file_name,
                     level=keywords.level,
-                    souce_sheet_name=keywords.source_sheet_name,
+                    source_sheet_name=keywords.source_sheet_name,
                     error_callback=self.error_callback,
                 )
             )
