@@ -2,7 +2,7 @@ import pandas as pd
 import datetime
 from pathlib import Path
 from .models import WorkFlowRule,WorkFlowRules,UnclassifiedKeywords
-from typing import  Dict,Optional,Callable
+from typing import  Dict,Optional,Callable,cast
 from .logger_config import logger
 
 class ExcelHandler:
@@ -73,6 +73,14 @@ class ExcelHandler:
                 current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
                 output_file = Path(f"关键词分类结果_{current_time}.xlsx")
                 logger.error(f"创建目录时出错: {str(e)}，将保存到当前目录: {output_file}")
+            
+            # 确保sheet名称存在
+            try:
+                if sheet_name is None:
+                    sheet_name = "Sheet1"
+                    logger.warning(f"未指定sheet名称，将使用默认名称: {sheet_name}")
+            except Exception as e:
+                raise Exception(f"获取sheet名称失败: {str(e)}")
             
             # 保存到Excel
             result_df.to_excel(output_file, index=False, sheet_name=sheet_name)
@@ -161,6 +169,9 @@ class ExcelHandler:
             if not file_name.startswith("待分类_"):
                 raise ValueError(f"待分类文件名必须以'待分类_'开头，当前文件名: {file_name}")
             
+            # 读取Excel文件的所有sheet
+            excel_file = pd.ExcelFile(file_path)
+            sheet_names = excel_file.sheet_names
             # 读取Excel文件
             df = pd.read_excel(file_path)
             
@@ -170,7 +181,7 @@ class ExcelHandler:
             
             # 清理数据
             keywords = df['关键词'].dropna().astype(str).tolist()
-            return UnclassifiedKeywords(data=keywords,level=1,error_callback=self.error_callback)
+            return UnclassifiedKeywords(data=keywords,level=1,source_file_name=file_name,source_sheet_name=cast(str,sheet_names[0]),error_callback=self.error_callback)
         except Exception as e:
             raise Exception(f"读取待分类文件失败: {str(e)}")
     def read_stage_results(self, file_path: Path) -> Dict[str,pd.DataFrame]:
@@ -199,7 +210,7 @@ class ExcelHandler:
         except Exception as e:
             raise Exception(f"读取分类结果文件失败: {str(e)}")
     
-    def read_stage_classified_sheet_name(self, file_path: Dict[str,Path]) -> Dict[str,Dict[str,list[str]|Path]]:
+    def read_stage_classified_sheet_name(self, file_dict: Dict[str,Path]) -> Dict[str,Dict[str,list[str]|Path]]:
         """读取分类结果文件
         
         Args:
@@ -210,7 +221,7 @@ class ExcelHandler:
         """
         try:
             result = {}
-            for output_name,file_path in file_path.items():
+            for output_name,file_path in file_dict.items():
                 # 读取Excel文件的所有sheet
                 excel_file = pd.ExcelFile(file_path)
                 sheet_names = list(excel_file.sheet_names)
@@ -218,3 +229,15 @@ class ExcelHandler:
             return result
         except Exception as e:
             raise Exception(f"读取分类结果文件失败: {str(e)}")
+    
+    def read_stage_result(self, file_path:Path,sheet_name:str) -> pd.DataFrame:
+        """读取分类结果文件
+        
+        Args:
+            file_path: 分类结果文件路径
+            sheet_name: 分类结果sheet名称
+        Returns:
+           pd.DataFrame
+        """
+        df = pd.read_excel(file_path, sheet_name=sheet_name)
+        return df
