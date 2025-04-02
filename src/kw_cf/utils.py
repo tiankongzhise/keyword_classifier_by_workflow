@@ -42,7 +42,7 @@ class WorkFlowProcessorUtil(object):
             
         
   
-    def transform_to_df(self,data:List[models.UnMatchedKeyword|models.ClassifiedKeyword])->pd.DataFrame:
+    def transform_to_df(self,data:List[models.ClassifiedKeyword]|List[models.UnMatchedKeyword])->pd.DataFrame:
         map_func = {
             models.UnMatchedKeyword:self.transfrom_unmathced_keywords,
             models.ClassifiedKeyword:self.transfrom_classified_keywords
@@ -58,8 +58,8 @@ class WorkFlowProcessorUtil(object):
         if result['level'] >= 2:
             result['classified_sheet_name'] = rule_item.classified_sheet_name
         if result['level'] >= 3:
-             result['rule_tage'] = rule_item.rule_tag
-             result['rule_tag_column'] = f'阶段{result['level']}规则标签',
+             result['rule_tag'] = rule_item.rule_tag
+             result['rule_tag_column'] = f'阶段{result['level']}规则标签'
         if result['level'] >= 4:
             result['parent_rule'] = rule_item.parent_rule
             result['parent_rule_column'] = f'阶段{result['level']-1}父级规则'
@@ -68,7 +68,7 @@ class WorkFlowProcessorUtil(object):
         result = {
             'level':keyword_item.level,
             'keyword':keyword_item.keyword,
-            'output_name':keyword_item.source_file_name or '未分类关键词',
+            'output_name':'未分类关键词' if keyword_item.level ==1 else keyword_item.source_file_name,
             'classified_sheet_name':'Sheet1' if keyword_item.source_file_name is None else '未匹配关键词' ,
             'source_sheet_name':keyword_item.source_sheet_name or 'Sheet1'
         }
@@ -99,7 +99,11 @@ class WorkFlowProcessorUtil(object):
 
                     #创建映射字典
                     temp_dict = self.fromat_matched_rule_dict(rule_item.rules[0])
-                    temp_dict['keyword'] = keyword    
+                    temp_dict['keyword'] = keyword
+                    if temp_dict.get('output_name','') == '全':
+                        temp_dict['output_name'] = temp.source_file_name
+                    if temp_dict.get('classified_sheet_name','') == '全':
+                        temp_dict['classified_sheet_name'] = temp.source_sheet_name
                     classified_keywords.append(
                         models.ClassifiedKeyword(**temp_dict))
                 else:
@@ -146,9 +150,9 @@ class WorkFlowProcessorUtil(object):
             if self.error_callback:
                 self.error_callback(msg)
             raise Exception(msg)
-        keywords = result_df['关键词'].astype(str).tolist()
+        keywords = cast(List[str],result_df['关键词'].astype(str).tolist())
         
-        return models.UnclassifiedKeywords(data=keywords,source_file_name=source_sheet_name,source_sheet_name=source_sheet_name,level=level,error_callback=self.error_callback)
+        return models.UnclassifiedKeywords(data=keywords,source_file_name=source_file_name,source_sheet_name=source_sheet_name,level=level,error_callback=self.error_callback)
     @staticmethod
     def create_fail_process_return_result(level:int,info:str) -> models.ProcessReturnResult:
         return models.ProcessReturnResult(
