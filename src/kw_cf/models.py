@@ -126,6 +126,8 @@ class UnclassifiedKeywords(BaseModel):
     error_callback: Optional[Callable[..., Any]] = Field(
         None, exclude=True, description="错误信息回调函数"
     )
+    parent_workflow_rule_column_name:str|None = Field(None,description="上阶段分类规则列名")
+    parent_workflow_rule_str:str|None = Field(None,description="上阶段分类规则")
 
 
     @field_validator("data", mode='before')
@@ -251,7 +253,7 @@ class WorkFlowRule(BaseModel):
     output_name:str = Field(...,min_length=1,description="分类结果表名称")# 分类结果表名称
     classified_sheet_name:str|None = Field(None,min_length=1,description="分类结果sheet名称")# 分类结果sheet名称
     rule_tag:str|None = Field(None,min_length=1,description="规则标签")
-    parent_rule:str|None = Field(None,min_length=1,description="父级规则")# 父级规则
+    parent_rule:str|None = Field(None,min_length=1,description="上阶段分类规则")# 上阶段分类规则
     
     
     @model_validator(mode = 'after')
@@ -261,7 +263,7 @@ class WorkFlowRule(BaseModel):
         if self.level > 1 and not self.classified_sheet_name:
             err_msg.append(f"工作流规则 {self.rule} 的流程层级大于1，但没有指定分类结果sheet名称,self is {self}")
         if self.level > 3 and not self.parent_rule:
-            err_msg.append(f"工作流规则 {self.rule} 的流程层级为{self.level}，但指定没有指定父规则,self is {self}")
+            err_msg.append(f"工作流规则 {self.rule} 的流程层级为{self.level}，但指定没有指定上阶段分类规则,self is {self}")
         if self.level >=3 and not self.rule_tag:
             err_msg.append(f"工作流规则 {self.rule} 的流程层级为{self.level}，但指定没有指定规则标签,self is {self}")
         if err_msg:
@@ -278,7 +280,7 @@ class WorkFlowRules(BaseModel):
                 rule:分类规则
                 output_name:分类结果表名称
                 classified_sheet_name:分类结果sheet名称
-                parent_rule:父级规则
+                parent_rule:上阶段分类规则
                 level:工作流层级
     '''
     rules:List[WorkFlowRule] = Field(...,min_length=1,description="工作流规则")# 工作流规则
@@ -299,6 +301,11 @@ class WorkFlowRules(BaseModel):
         parent_rules_name_list = [rule.parent_rule for rule in self.rules if rule.level == level and rule.parent_rule]
         return parent_rules_name_list
 
+    def get_parent_rules_list(self) -> List[str]:
+        """获取所有上阶段分类规则"""
+        parent_rules_list = [rule.parent_rule for rule in self.rules if rule.parent_rule]
+        return parent_rules_list
+    
     def get_child_rules(self, parent_rule: str) -> Optional['WorkFlowRules']:
         """获取指定父规则的所有子规则"""
         rules = [rule for rule in self.rules if rule.parent_rule == parent_rule]
@@ -449,6 +456,7 @@ class ClassifiedKeyword(BaseModel):
     rule_tag:str|None = Field(None,min_length=1,description="规则标签")
     parent_rule_column:str|None = Field(None,min_length=1,description="父级规则列名")
     rule_tag_column:str|None = Field(None,min_length=1,description="规则标签列名")
+    level_rule_column:str|None = Field(None,min_length=1,description="等级规则列名")
 
 class UnMatchedKeyword(BaseModel):
     '''
@@ -662,157 +670,9 @@ class ProcessFilePaths(BaseModel):
         """判断是否为空"""
         return len(self.file_paths) == 0
     
-
-class ProcessTempResult(BaseModel):
-    '''
-    流程的阶段结果
-
-    args:
-
-        level:int 阶段
-        status:str 处理结果
-        data:ClassifiedResult 处理结果
-        message:str|None 错误信息
-
-    '''
-    level:int = Field(...,ge=1,description="分类层级")# 分类层级
-    status:Literal["success", "fail", "warning"] = Field(...,description="处理结果")# 处理结果
-    data:ClassifiedResult|None = Field(...,description="处理结果")# 处理结果
-    message:str|None = Field(None,description="错误信息")# 错误信息
     
-    @model_validator(mode = 'after')
-    def validate_rules(self):
-        """验证规则"""
-        if self.status != "success" and (self.message is None or self.message == ""):
-            raise ValueError(f"level:{self.level},status:{self.status},message:{self.message},请填写错误信息")
-        return self
     
-class ProcessTempResults(BaseModel):
-    '''
-    流程的中间结果列表
-    '''
-    data :List[ProcessTempResult] = Field(...,min_length=1,description="处理结果列表")# 处理结果列表
-
-            
-
-
-
-class ProcessLevelResult(BaseModel):
-    '''
-    流程的中间结果
-
-    args:
-
-        level:int 阶段
-        status:Literal["success", "fail", "warning"]  处理结果
-        next_level:int 下一个阶段名称,9999标识结束
-        message:str|None 错误信息
-
-    '''
-    level:int = Field(...,ge=0,description="阶段")# 阶段
-    status:Literal["success", "fail", "warning",'some_fail'] = Field(...,description="处理结果")# 处理结果
-    next_level:int = Field(...,ge=0,description="下一个阶段名称")# 下一个阶段名称
-    message:str|None = Field(None,description="错误信息")# 错误信息
-    success_items:List[Dict[str,str]] = Field(...,description="成功项")
-    fail_items:List[Dict[str,str]] = Field(...,description="失败项")
-
-    @model_validator(mode = 'after')
-    def validate_rules(self):
-        """验证规则"""
-        if self.status == "fail" and (self.message is None or self.message == ""):
-            raise ValueError("处理结果为fail时，必须提供错误信息")
-        return self
-
-
-class ProcessResult(BaseModel):
-    '''
-    处理结果
     
-    Args:
-        level:int 阶段
-        status:Literal["success", "fail", "warning"]  处理结果
-        source_file_name:str 来源文件名称
-        source_sheet_name:str 来源sheet
-        data:Any 处理结果
-        info:str|None 提示信息
-        output_file_name:str|None 输出文件名称
-        output_sheet_name:str|None 输出sheet名称
-    Validator:
-        validate_rules:验证规则
-        fail时必须有info信息
-        success时必须有output_file_name和output_sheet_name
-    '''
-    level:int = Field(...,ge=0,description="阶段")# 阶段
-    status:Literal["success", "fail", "warning"] = Field(...,description="处理结果")# 处理结果
-    source_file_name:str = Field(...,min_length=1,description="来源文件名称")# 来源文件
-    source_sheet_name:str = Field(...,min_length=1,description="来源sheet")# 来源sheet
-    data:Any = Field(...,description="处理结果") # 处理结果
-    info:str|None = Field(None,description="提示信息")# 提示
-    output_file_name:str|None = Field(...,description="输出文件名称")# 输出文件名称
-    output_sheet_name:str|None = Field(...,description="输出sheet名称")# 输出文件路径
-
-
-
-    @model_validator(mode = 'after')
-    def validate_rules(self) -> 'ProcessResult':
-        """验证规则"""
-        err_msg = []
-        if self.status == "fail" and (self.info is None or self.info == ""):
-            err_msg.append("models:ProcessResult,处理结果为fail时，必须提供错误信息")
-        if self.status == "success" and (self.output_file_name is None or self.output_file_name == ""):
-            err_msg.append("models:ProcessResult,处理结果为success时，必须提供输出文件名称")
-        if self.status == "success" and (self.output_sheet_name is None or self.output_sheet_name == ""):
-            err_msg.append("models:ProcessResult,处理结果为success时，必须提供输出sheet名称")
-        if len(err_msg) > 0:
-            raise ValueError('\n'.join(err_msg))
-        return self
-    
-class ProcessResults(BaseModel):
-    '''
-    处理结果列表
-    '''
-    data :List[ProcessResult] = Field(...,description="处理结果列表")
-    
-    def filter(self,**conditions:Any)->'ProcessResults':
-        """
-        返回满足任意条件组合的 ProcessResults 列表。
-        Conditions:
-            ProcessResult的任意字段名，值为期望的值或条件函数。
-                         例如: `output_name="Sheet1"` 或 `level=lambda x: x > 2`
-        Args:
-            level:int 阶段
-            status:Literal["success", "fail", "warning"]  处理结果
-            source_file_name:str 来源文件名称
-            source_sheet_name:str 来源sheet
-            data:Any 处理结果
-            info:str|None 提示信息
-            output_file_name:str|None 输出文件名称
-            output_sheet_name:str|None 输出sheet名称
-        Returns:
-            ProcessResults: ProcessResults
-        """
-        filter_items = []
-        for item in self.data:
-            match = True
-            for field, condition in conditions.items():
-                if not hasattr(item, field):
-                    raise ValueError(f"Invalid field: '{field}' is not a valid field of ProcessFilePath")
-
-                value = getattr(item, field)
-                # 如果条件是函数（如 lambda），则调用它进行判断
-                if callable(condition):
-                    if not condition(value):
-                        match = False
-                        break
-                # 否则直接比较值
-                elif value != condition:
-                    match = False
-                    break
-            if match:
-                filter_items.append(item)
-        return ProcessResults(data=filter_items)
-
-
 class ProcessReturnResult(BaseModel):
     '''
     处理结果
@@ -821,6 +681,7 @@ class ProcessReturnResult(BaseModel):
     status:Literal["success", "fail", "some_fail"] = Field(...,description="处理结果")# 处理结果
     info:str|None = Field(None,description="提示信息") # 提示信息
     process_sheet_count:int = Field(...,ge=0,description="已处理的 Sheet 总数量（含所有状态）") # 已处理的 Sheet 总数量（含所有状态）
-    sheet_status_counts: dict[str, int] = Field(..., description="按处理状态分类的 Sheet 数量统计（键为状态，如 success/fail/warning，值为对应数量）") # 按处理状态分类的 Sheet 数量统计（键为状态，如 success/fail/warning，值为对应数量）
+    sheet_status_counts: dict[str, int] = Field(..., description="按处理状态分类的 Sheet 数量统计（键为状态，如 success/fail/warning,no_process，值为对应数量）") # 按处理状态分类的 Sheet 数量统计（键为状态，如 success/fail/warning/no_process，值为对应数量）
     fail_items:List[Dict] = Field(...,description="失败的sheet明细")# 失败的sheet明细
     warning_items:List[Dict] = Field(...,description="警告的sheet明细")# 警告的sheet明细
+    no_process_items:List[Dict] = Field(...,description="无需处理的sheet明细")# 无需处理的sheet明细

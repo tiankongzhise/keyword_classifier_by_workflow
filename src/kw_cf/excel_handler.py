@@ -186,7 +186,13 @@ class ExcelHandler:
             
             # 清理数据
             keywords = cast(List[str],df['关键词'].dropna().astype(str).tolist())
-            return UnclassifiedKeywords(data=keywords,level=1,source_file_name=file_name,source_sheet_name=cast(str,sheet_names[0]),error_callback=self.error_callback)
+            return UnclassifiedKeywords(data=keywords,
+                                        level=1,
+                                        source_file_name=file_name,
+                                        source_sheet_name=cast(str,sheet_names[0]),
+                                        error_callback=self.error_callback,
+                                        parent_workflow_rule_column_name=None,
+                                        parent_workflow_rule_str=None)
         except Exception as e:
             raise Exception(f"读取待分类文件失败: {str(e)}")
     def read_stage_results(self, file_path: Path) -> Dict[str,pd.DataFrame]:

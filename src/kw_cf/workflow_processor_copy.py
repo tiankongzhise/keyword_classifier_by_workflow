@@ -2,7 +2,7 @@ from pathlib import Path
 
 from .keyword_classifier import KeywordClassifier
 from .excel_handler import ExcelHandler
-from typing import Optional,Callable,cast,Any
+from typing import Optional,Callable,cast
 from . import models
 from . import utils                          
                           
@@ -259,7 +259,7 @@ class WorkFlowProcessor:
             
    
     def process_stage3(self)->models.ProcessReturnResult:
-        # 预处理,如果一阶段没有成功分类的文件，则直接返回失败
+        # 预处理,如果二阶段没有成功分类的文件，则直接返回失败
         if self.process_file_path is None:
             msg ='stage1没有分类成功的关键词,请检查关键词分类规则是否正确'
             self.set_level_end()
@@ -312,8 +312,8 @@ class WorkFlowProcessor:
                 continue
 
             matched_keywords = self.tools.get_classification_groups(classified_result,'sheet','match')
-            temp_process_return_result_dict = self.tools.create_temp_process_return_result_dict(self.level)
-            
+
+
             # 保存分类成功的关键词
             if matched_keywords:
                 for tuple_item, matched_keyword_list in matched_keywords.items():
@@ -321,8 +321,9 @@ class WorkFlowProcessor:
                     source_file_path = file_path
                     output_file:Path = self.tools.generate_timestamped_path(base_dir=self.output_dir,filename=output_name)
                     tag_column_name = matched_keyword_list[0].rule_tag_column
+                    level_column_name = matched_keyword_list[0].level_rule_column
                     df = self.tools.transform_to_df(matched_keyword_list)
-                    self.excel_handler.add_sheet_columns(excel_path=source_file_path,sheet_name=classified_sheet_name,new_df=df,key_mapping={'关键词':'关键词'},tag_mapping={tag_column_name:tag_column_name})
+                    self.excel_handler.add_sheet_columns(excel_path=source_file_path,sheet_name=classified_sheet_name,new_df=df,key_mapping={'关键词':'关键词'},tag_mapping={tag_column_name:tag_column_name,level_column_name:level_column_name})
                     level = self.level
                     temp_process_path_file_list.append(models.ProcessFilePath(file_path=output_file,level=level,output_name=cast(str,output_name),classified_sheet_name=classified_sheet_name))
                     self.tools.update_temp_process_return_result_dict(temp_process_return_result_dict,'success',f'stage3,文件：{source_file_name},sheet：{source_sheet_name},分类成功',output_name,classified_sheet_name)
@@ -332,10 +333,133 @@ class WorkFlowProcessor:
             return self.tools.create_fail_process_return_result(self.level,'第三阶段分类结果为有值,但输出的结果为空，请检查process_stage3关于matched_keywords的代码')
                 
         # 将成功分类的文件更新存储在self对象中,供后续阶段使用
-        self.process_file_path = models.ProcessFilePaths(file_paths=temp_process_path_file_list)
+        # self.process_file_path = models.ProcessFilePaths(file_paths=temp_process_path_file_list)
         temp_process_return_result_dict['info'] = '第三阶段分类成功'
         return models.ProcessReturnResult(**temp_process_return_result_dict)
+    def process_stage_high(self)->models.ProcessReturnResult:
+        # 预处理,如果二阶段没有成功分类的文件，则直接返回失败
+        if self.process_file_path is None:
+            msg =f'stage{self.level}获取process_file_path失败'
+            self.set_level_end()
+            return self.tools.create_fail_process_return_result(self.level,msg)
+        
+        # 获取分类规则
+        workflow_rules = self.workflow_rules
+        level_workflow_rules = workflow_rules.get(self.level)
+        if level_workflow_rules is None:
+            msg = f'process stage {self.level}获取分类规则失败,level：{self.level}'
+            self.set_level_end()
+            return self.tools.create_fail_process_return_result(self.level,msg)
 
+        # 生成临时结果dict,用来保存分类结果
+        temp_process_return_result_dict = self.tools.create_temp_process_return_result_dict(self.level)
+        
+        #生成上一阶段匹配规则列名称
+        parent_workflow_rule_column_name = f'阶段{self.level-1}匹配规则'
+        
+        # 进行阶段分类
+        for process_item in self.process_file_path.file_paths:
+            source_file_path = process_item.file_path
+            source_file_name = process_item.output_name
+            source_sheet_name = process_item.classified_sheet_name or 'Sheet1'
+            level = self.level
+            output_file:Path = self.tools.generate_timestamped_path(base_dir=self.output_dir,filename=source_file_name)
+            
+            # 获取待分类关键词
+            result_df = self.excel_handler.read_stage_result(source_file_path,source_sheet_name)
+            
+            # 获取分类规则
+            sheet_workflow_rules = level_workflow_rules.filter_rules(output_name=lambda x:x==source_file_name or x=='全',classified_sheet_name=lambda x:x==source_sheet_name or x=='全',rule_tag = lambda x:x is not None)
+            if sheet_workflow_rules is None:
+                msg = f'stage3,source_file:{source_file_name},sheet：{source_sheet_name},没有需要分类的规则'
+                self.tools.update_temp_process_return_result_dict(temp_process_return_result_dict,status='warning',output_file_name=source_file_name,output_sheet_name=source_sheet_name,info=msg)
+                continue
+            
+            all_parent_workflow_rules = sheet_workflow_rules.filter_rules(parent_rule=lambda x:x is not None)
+            if all_parent_workflow_rules is None:
+                msg = msg = f'stage3,source_file:{source_file_name},sheet：{source_sheet_name},存在需要分类的规则,但是上层分类规则不存在,sheet_workflow_rules:{sheet_workflow_rules}'
+                raise ValueError(msg)
+            parent_workflow_rules_list = all_parent_workflow_rules.get_parent_rules_list()
+            
+            temp_list = []
+            for parent_workflow_rule_str in parent_workflow_rules_list:
+                
+                #针对上阶段分类规则进行筛选
+                parent_workflow_rules = all_parent_workflow_rules.filter_rules(parent_rule = parent_workflow_rule_str)
+                
+                #筛选存在上阶段分类规则的行
+                parent_workflow_rule_df = result_df.loc[
+                    result_df[parent_workflow_rule_column_name].str.lower() == parent_workflow_rule_str.lower()
+                ].copy()
+                
+                
+                if parent_workflow_rule_df.empty:
+                    msg = f"文件{source_file_name}的{source_sheet_name}的{parent_workflow_rule_column_name}列没有{parent_workflow_rule_str}"
+                    if self.error_callback:
+                        self.error_callback(msg)
+                    continue
+                
+            
+            
+ 
+                unclassifie_keywords = self.tools.get_unclassified_keywords_from_result_df(result_df,
+                                                                                           source_file_name,
+                                                                                           source_sheet_name,
+                                                                                           level,parent_workflow_rule_column_name,
+                                                                                           parent_workflow_rule_str)
+                # 针对上层分类规则的详细分类结果
+                classified_result = self.classfy_keyword(cast(models.UnclassifiedKeywords,unclassifie_keywords),
+                                                         cast(models.WorkFlowRules,parent_workflow_rules))
+                
+                
+                if classified_result.is_empty('classified_keywords'):
+                    msg = f'stage3,文件：{source_file_name},sheet：{source_sheet_name},没有匹配任何一条规则'
+                    print(msg)
+                    continue
+
+                matched_keywords = self.tools.get_classification_groups(classified_result,'parent_rule','match')
+
+
+                # 保存分类成功的关键词
+                if matched_keywords:
+                    for _, matched_keyword_list in matched_keywords.items():
+                        tag_column_name = matched_keyword_list[0].rule_tag_column
+                        level_column_name = matched_keyword_list[0].level_rule_column
+                        df_match = self.tools.transform_to_df(matched_keyword_list)
+                        df_merge = self.tools.add_sheet_columns(df_old=parent_workflow_rule_df,
+                                                                new_df=df_match,
+                                                                key_mapping={'关键词':'关键词',parent_workflow_rule_column_name:'匹配的规则'},
+                                                                tag_mapping={tag_column_name:tag_column_name,level_column_name:level_column_name},
+                                                                keep_unmatched=False)
+                        temp_list.append(df_merge)
+            
+            # 处理sheet无匹配的情况
+            if temp_list is None:
+                msg = f'source_file_name:{source_file_name},souce_sheet_name:{source_sheet_name}存在需要匹配的规则,但是没有匹配到任何数据'
+                self.tools.update_temp_process_return_result_dict(temp_process_return_result_dict,status='warning',info=msg,output_file_name=source_file_name,output_sheet_name=source_sheet_name)
+                continue
+            sheet_match_df = self.tools.get_sheet_match_df(temp_list)
+            tag_column_name = self.tools.get_tag_column_name(self.level)
+            level_column_name = self.tools.get_level_column_name(self.level)
+            self.excel_handler.add_sheet_columns(
+                excel_path=source_file_path,
+                sheet_name=source_sheet_name,
+                new_df=sheet_match_df,
+                key_mapping={'关键词':'关键词',parent_workflow_rule_column_name:parent_workflow_rule_column_name},
+                tag_mapping={tag_column_name:tag_column_name,level_column_name:level_column_name},
+                new_file_path=None,
+                keep_unmatched=True
+            )
+            self.tools.update_temp_process_return_result_dict(
+                temp_dict=temp_process_return_result_dict,
+                status='success',
+                info='stage{self.level},文件：{source_file_name},sheet：{source_sheet_name},分类成功',
+                output_file_name=source_file_name,
+                output_sheet_name=source_sheet_name
+            )
+        temp_process_return_result_dict['info'] = f'阶段:{self.level}成功结束'
+        return models.ProcessReturnResult(**temp_process_return_result_dict)
+    
             
     def process_workflow(self, rules_file: Path, classification_file: Path)->models.ProcessReturnResult:
         """处理完整工作流
@@ -365,21 +489,31 @@ class WorkFlowProcessor:
                 # 处理阶段1：基础分类,将词分类到各xlsx文件中
                 stage_result = self.process_stage1(unclassified_keywords)
             
-            # 执行完阶段一 进入下一阶段
+            # 阶段加1
             self.add_level()
 
             # 判断是否有下一阶段规则,执行相应处理
             if self.is_next_process():
                 # 处理阶段2：分类结果处理,将分类结果保存到excel中
                 stage_result = self.process_stage2()
-            print(stage_result)
-            # 执行完阶段二 进入下一阶段
+                
+            # 阶段加1
             self.add_level()
+            
+            # 判断是否有下一阶段规则,执行相应处理
             if self.is_next_process():
                 # 处理阶段3：分类结果处理,将分类结果保存到excel中
                 stage_result = self.process_stage3()  
             
+            # 阶段加1 
+            self.add_level()
             
+            # 循环判断是否有下一阶段规则,执行相应处理
+            while self.is_next_process():
+                # 调用高阶规则,处理后保存到exel中
+                stage_result = self.process_stage_high()
+                
+                self.add_level()
             
             return stage_result
             
