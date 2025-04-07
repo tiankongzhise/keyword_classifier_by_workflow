@@ -255,7 +255,20 @@ class WorkFlowRule(BaseModel):
     rule_tag:str|None = Field(None,min_length=1,description="规则标签")
     parent_rule:str|None = Field(None,min_length=1,description="上阶段分类规则")# 上阶段分类规则
     
-    
+
+    @model_validator(mode='before')
+    @classmethod
+    def preprocess_fields(cls, data: dict) -> dict:
+        """Pre-process fields before validation"""
+        if 'rule' in data:
+            # Convert to string if not already
+            rule_str = str(data['rule']) if data['rule'] is not None else ''
+            # Clean the text
+            cleaned_rule = _preprocess_text(rule_str).strip()
+            if not cleaned_rule:
+                raise ValueError(f"WorkFlowRule.preprocess_fields,清洗后分类规则为空,原数据为{data}")
+            data['rule'] = cleaned_rule
+        return data
     @model_validator(mode = 'after')
     def validate_rules(self)->'WorkFlowRule':
         """验证工作流规则"""
