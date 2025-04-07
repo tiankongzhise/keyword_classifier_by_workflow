@@ -355,6 +355,11 @@ class WorkFlowRules(BaseModel):
                     if not condition(value):
                         match = False
                         break
+                # 如果条件是字符串，则比较字符串    
+                elif isinstance(condition, str):
+                    if value.lower() != condition.lower():
+                        match = False
+                        break
                 # 否则直接比较值
                 elif value != condition:
                     match = False

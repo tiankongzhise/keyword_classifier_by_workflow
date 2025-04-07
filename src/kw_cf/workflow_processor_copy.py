@@ -414,7 +414,6 @@ class WorkFlowProcessor:
                 
                 if classified_result.is_empty('classified_keywords'):
                     msg = f'stage3,文件：{source_file_name},sheet：{source_sheet_name},没有匹配任何一条规则'
-                    print(msg)
                     continue
 
                 matched_keywords = self.tools.get_classification_groups(classified_result,'parent_rule','match')
