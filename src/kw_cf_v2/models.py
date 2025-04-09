@@ -18,6 +18,7 @@ class SourceKeyword:
     source_file_name:str = field(default='')
     source_sheet_name:str = field(default='')
     source_file_Path:Path|None = field(default=None)
+    process_level:int = field(default=-1)
     matched_info:dict = field(default_factory=dict)
 
 @dataclass
@@ -30,7 +31,8 @@ class ClassifiedKeyword:
         source_sheet_name:str = field(default='')
         output_file_name:str = field(default='')
         output_sheet_name:str = field(default='')
-        matched_rule:dict = field(default_factory=dict)
+        process_level:int = field(default=-1)
+        matched_info:dict = field(default_factory=dict)
     '''
     keyword:str = field(default='')
     source_file_name:str = field(default='')

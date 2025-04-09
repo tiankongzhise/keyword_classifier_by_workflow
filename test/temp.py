@@ -2,7 +2,7 @@ from src.kw_cf_v2.excel_handler import read_keywords,read_work_flow_rules
 from src.kw_cf_v2.models import FileInfo,SourceKeywordDTO
 from pathlib import Path
 from dataclasses import is_dataclass
-from src.kw_cf_v2.utils import processing_keyword
+from src.kw_cf_v2.utils import processing_keyword,trans_work_flow_rules_to_dict
 from src.kw_cf_v2.main import main
 
 def test_keyword_read():
@@ -22,18 +22,27 @@ def test_dict_pop_none():
     print(f'y:{y}')
 
 def test_read_work_flow_rules():
-    file_path = Path(__file__).parent.parent /"data/工作流规则_Java类分词.xlsx"
+    file_path = Path(__file__).parent.parent /"data/工作流规则_完整分词2.xlsx"
     print(f'file_path:{file_path}')
     print(f'file_path.exists():{file_path.exists()}')
     print(f'file_path.is_file():{file_path.is_file()}')
-    file_info = FileInfo(file_path=file_path,sheet_name="Java类分词",file_name="Java类分词")
+    file_info = FileInfo(file_path=file_path,sheet_name="",file_name="工作流规则")
     rules = read_work_flow_rules(file_info)
-    print(f'rules:{rules}')
+    return rules
 
 def test_processing_keyword():
     keyword = ''
     print(f'keyword:{[keyword]}')
     print(f'processing_keyword(keyword):{[processing_keyword(keyword)]}')
+
+def test_trans():
+    work_flow = test_read_work_flow_rules()
+    result_dict = trans_work_flow_rules_to_dict(work_flow)
+    print(result_dict)
+
+def test_dict():
+    x= {'a':1,'b':"",'c':11}
+    print(list(x.keys())[0])
 
 def test_main():
     main()

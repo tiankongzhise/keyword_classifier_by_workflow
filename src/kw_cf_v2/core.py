@@ -1,15 +1,21 @@
 from lark import Lark, Transformer, v_args
 from typing import List, Optional, Callable
 from .models import WorkFlowRuleDTO,SourceKeyword,SourceKeywordDTO,ClassifiedKeyword,ClassifiedKeywordDTO,WorkFlowRule
-from .utils import processing_pipeline,processing_keyword
 from .message import message
-from copy import deepcopy
 from tqdm import tqdm
-
+from .utils import (processing_pipeline,
+                    processing_keyword,
+                    trans_work_flow_rules_to_dict,
+                    create_classified_keyword,
+                    get_target_file_name,
+                    get_target_sheet_name,
+                    is_matched,
+                    get_rules_tag_info)
+from copy import deepcopy
 
 class KeywordClassifier:
     def __init__(self, case_sensitive=False, separator="&"):
-        self.rules = WorkFlowRuleDTO()
+        self.rules = {}
         self.parsed_rules = []
         self.case_sensitive = case_sensitive
         self.separator = separator
@@ -110,7 +116,7 @@ class KeywordClassifier:
             raise ValueError("存在多个层级的规则,非预期情况")
         self.process_level = list(rule_level)[0]
         
-        self.rules = rules
+        self.rules = trans_work_flow_rules_to_dict(rules)
 
         self.parsed_rules = []
 
@@ -179,34 +185,140 @@ class KeywordClassifier:
 
 
     def classify_keyword(self, keyword: SourceKeyword)->ClassifiedKeyword:
-        new_keyword = processing_keyword(keyword)
+        new_keyword = processing_keyword(keyword.keyword)
         matched_rule = ''
+        #多阶段容错 未分类直接返回
+        if keyword.source_file_name == '未匹配任何规则':
+            return create_classified_keyword(new_keyword=new_keyword,
+                                keyword=keyword,
+                                matched_rule='',
+                                process_level=keyword.process_level,
+                                target_file_name='未匹配任何规则',
+                                target_sheet_name='Sheet1',
+                                matched_info=keyword.matched_info)
+        
+
+
+
+
+
         for rule_text, rule_matcher in self.parsed_rules:
             if rule_matcher(new_keyword):
                 matched_rule = rule_text
-                break
-        temp_item = ClassifiedKeyword()
-        temp_item.keyword = new_keyword
-        temp_item.source_file_name = keyword.source_file_name
-        temp_item.source_sheet_name = keyword.source_sheet_name
-        temp_item.source_file_Path = keyword.source_file_Path
-        temp_item.process_level = self.process_level
+                local_matched_rule:str = deepcopy(rule_text)
+                local_matched_rule = local_matched_rule.lower()
+                if keyword.process_level == 1:
+                    target_file_name = get_target_file_name(self.rules,keyword.process_level,local_matched_rule,keyword)
+                    target_sheet_name = get_target_sheet_name(self.rules,keyword.process_level,local_matched_rule,target_file_name,keyword)
+                    local_matched_info = deepcopy(keyword.matched_info)
+                    return create_classified_keyword(new_keyword=new_keyword,
+                                                     keyword=keyword,
+                                                     matched_rule=matched_rule,
+                                                     process_level=keyword.process_level,
+                                                     target_file_name=target_file_name,
+                                                     target_sheet_name=target_sheet_name,
+                                                     matched_info=local_matched_info)
+                elif keyword.process_level == 2:
+                    if self.rules.get(keyword.process_level,{}).get(local_matched_rule,{}).get(keyword.source_file_name,None):
+                        target_file_name = get_target_file_name(self.rules,keyword.process_level,local_matched_rule,keyword)
+                        target_sheet_name = get_target_sheet_name(self.rules,keyword.process_level,local_matched_rule,target_file_name,keyword)
+                        local_matched_info = deepcopy(keyword.matched_info)
+                        return create_classified_keyword(new_keyword=new_keyword,
+                                                        keyword=keyword,
+                                                        matched_rule=matched_rule,
+                                                        process_level=keyword.process_level,
+                                                        target_file_name=target_file_name,
+                                                        target_sheet_name=target_sheet_name,
+                                                        matched_info=local_matched_info)
+                    if self.rules.get(keyword.process_level,{}).get(local_matched_rule,None):
+                        target_file_name = get_target_file_name(self.rules,keyword.process_level,local_matched_rule,keyword)
+                        target_sheet_name = '未分类'
+                        local_matched_info = deepcopy(keyword.matched_info)
+                        return create_classified_keyword(new_keyword=new_keyword,
+                                                        keyword=keyword,
+                                                        matched_rule=matched_rule,
+                                                        process_level=keyword.process_level,
+                                                        target_file_name=target_file_name,
+                                                        target_sheet_name=target_sheet_name,
+                                                        matched_info=local_matched_info)
+
+
+                elif keyword.process_level == 3:
+                    if is_matched(self.rules,keyword,local_matched_rule):
+                        target_file_name = get_target_file_name(self.rules,keyword.process_level,local_matched_rule,keyword)
+                        target_sheet_name = get_target_sheet_name(self.rules,keyword.process_level,local_matched_rule,target_file_name,keyword)
+                        local_matched_info = deepcopy(keyword.matched_info)
+                        local_matched_info.update(get_rules_tag_info(self.rules,keyword,local_matched_rule))
+                        return create_classified_keyword(new_keyword=new_keyword,
+                                                        keyword=keyword,
+                                                        matched_rule=matched_rule,
+                                                        process_level=keyword.process_level,
+                                                        target_file_name=target_file_name,
+                                                        target_sheet_name=target_sheet_name,
+                                                        matched_info=local_matched_info)
+                elif keyword.process_level >3:
+                    temp_info = is_matched(self.rules,keyword,local_matched_rule)
+                    if temp_info:
+                        target_file_name = get_target_file_name(self.rules,keyword.process_level,local_matched_rule,keyword)
+                        target_sheet_name = get_target_sheet_name(self.rules,keyword.process_level,local_matched_rule,target_file_name,keyword)
+                        last_matched_rule_col_name = f'阶段{keyword.process_level-1}匹配规则'
+                        local_matched_info = deepcopy(keyword.matched_info)
+                        local_matched_info.update(get_rules_tag_info(self.rules,keyword,local_matched_rule))
+                        for item in temp_info:
+                            if item['limit_last_matched_rule'] == '全':
+                                return create_classified_keyword(new_keyword=new_keyword,
+                                                            keyword=keyword,
+                                                            matched_rule=matched_rule,
+                                                            process_level=keyword.process_level,
+                                                            target_file_name=target_file_name,
+                                                            target_sheet_name=target_sheet_name,
+                                                            matched_info=local_matched_info)
+                            
+                            if keyword.matched_info[last_matched_rule_col_name] == item['limit_last_matched_rule']:
+                                return create_classified_keyword(new_keyword=new_keyword,
+                                                            keyword=keyword,
+                                                            matched_rule=matched_rule,
+                                                            process_level=keyword.process_level,
+                                                            target_file_name=target_file_name,
+                                                            target_sheet_name=target_sheet_name,
+                                                            matched_info=local_matched_info)
+                else:
+                    raise Exception(f'{self.__class__.__name__}->classify_keyword 出现意料外的keyword.process_level:{keyword.process_level}')
+        if matched_rule:
+            if keyword.process_level <4:
+                raise Exception(f'{self.__class__.__name__}->classify_keyword 出现意料外的matched_rule:{matched_rule},在循环在,应该提前返回才对,请检查是否存在冲突规则,keyword:{keyword}')
+            else:
+                message.warning(f'{self.__class__.__name__}->classify_keyword 出现意料外的matched_rule:{matched_rule},在循环在,应该提前返回才对,请检查是否存在冲突规则,keyword:{keyword}')
+
         
-        matched_rule_item_list = self.rules.filter(rule_level=self.process_level,rule=matched_rule).data #type:ignore
-        if not matched_rule_item_list:
-            raise Exception(f"{self.__class__.__name__}->classify_keyword:keyword:{keyword}匹配到了{matched_rule},但是不存在在规则列表中")
-        matched_rule_item:WorkFlowRule = matched_rule_item_list[0]
-        temp_item.output_file_name = matched_rule_item.target_file_name
-        temp_item.output_sheet_name = matched_rule_item.target_sheet_name
-        temp_item.matched_info = deepcopy(keyword.matched_info)
-        if self.process_level >=3:
-            new_matched_rule_col_name = f'阶段{self.process_level}匹配规则'
-            new_matched_rule_tag_col_name = f'阶段{self.process_level}匹配标签'
+        if keyword.process_level == 1:
+            return create_classified_keyword(new_keyword=new_keyword,
+                                            keyword=keyword,
+                                            matched_rule='',
+                                            process_level=keyword.process_level,
+                                            target_file_name='未匹配任何规则',
+                                            target_sheet_name='Sheet1',
+                                            matched_info=keyword.matched_info)
+        elif keyword.process_level == 2:
+            return create_classified_keyword(new_keyword=new_keyword,
+                                            keyword=keyword,
+                                            matched_rule='',
+                                            process_level=keyword.process_level,
+                                            target_file_name=keyword.source_file_name,
+                                            target_sheet_name='未匹配',
+                                            matched_info=keyword.matched_info)
         else:
-            new_matched_rule_col_name = '匹配规则'
-            new_matched_rule_tag_col_name = '匹配标签'
-        temp_item.matched_info[new_matched_rule_col_name] = matched_rule
-        temp_item.matched_info[new_matched_rule_tag_col_name] = matched_rule_item.rule_tag
-        return temp_item
+            return create_classified_keyword(new_keyword=new_keyword,
+                                keyword=keyword,
+                                matched_rule='',
+                                process_level=keyword.process_level,
+                                target_file_name=keyword.source_file_name,
+                                target_sheet_name=keyword.source_sheet_name,
+                                matched_info={})    
+
+
+
+
+
         
         

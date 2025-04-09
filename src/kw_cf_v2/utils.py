@@ -1,6 +1,7 @@
 from typing import List,Tuple,Set,Any
 from .message import message
-from .models import ClassifiedKeyword
+from .models import ClassifiedKeyword,WorkFlowRuleDTO,SourceKeyword,ClassifiedKeywordDTO,SourceKeywordDTO
+from copy import deepcopy
 def preprocess_text(text, error_callback=None):
     """预处理文本，清除不可见的干扰字符
     Args:
@@ -128,3 +129,131 @@ def fomart_classified_keywords_to_dict(classified_keyword:ClassifiedKeyword) -> 
         'process_level':classified_keyword.process_level,
         'data':temp_dict
     }
+
+def trans_work_flow_rules_to_dict(workflow_rules:WorkFlowRuleDTO) -> dict:
+    """格式化分类结果"""
+    result_dict = {}
+    for workflow_rule in workflow_rules.data:
+        result_dict.setdefault(workflow_rule.rule_level,{}).setdefault(workflow_rule.rule.lower(),{}).setdefault(workflow_rule.target_file_name,{}).setdefault(workflow_rule.target_sheet_name,[]).append({'limit_last_matched_rule':workflow_rule.limit_last_matched_rule,'rule_tag':workflow_rule.rule_tag})
+    
+    err_list = []
+    for level,rule_rule_dict in result_dict.items():
+        for rule,target_file_dict in rule_rule_dict.items():
+            for file_name,target_sheet_dict in target_file_dict.items():
+                for sheet_name,info in target_sheet_dict.items():
+                    if len(info) > 1:
+                        err_list.append(f"规则{rule}在等级{level},文件{file_name}的{sheet_name}中存在重复的匹配规则{info}")
+    if err_list:
+        message.error('\n'.join(err_list))
+        raise 
+    
+    return result_dict
+def get_target_file_name(rules_map:dict,process_level:int,matched_rule:str,keyword:SourceKeyword) -> str:
+    """获取目标文件名"""
+    rsp = list(rules_map.get(process_level,{}).get(matched_rule.lower(),{}).keys())
+    if rsp:
+        if rsp[0] == '全':
+            return keyword.source_file_name
+        else:
+            return rsp[0]
+    else:
+        raise ValueError(f"get_target_file_name出现意料外的错误,规则{matched_rule}在等级{process_level}中不存在")
+def get_target_sheet_name(rules_map:dict,process_level:int,matched_rule:str,target_file_name:str,keyword:SourceKeyword) -> str:
+    """获取目标sheet名"""
+    if process_level == 1:
+        return 'Sheet1'
+    rsp = list(rules_map.get(process_level,{}).get(matched_rule.lower(),{}).get(target_file_name,{}).keys())
+    rsp1 = list(rules_map.get(process_level,{}).get(matched_rule.lower(),{}).get('全',{}).keys())
+    if rsp:
+        if rsp[0] == '全':
+            return keyword.source_sheet_name
+        else:
+            return rsp[0]
+    elif rsp1:
+        if rsp1[0] == '全':
+            return keyword.source_sheet_name
+        else:
+            return rsp1[0]
+    else:
+        raise ValueError(f"get_target_sheet_name出现意料外的错误,规则{matched_rule}在等级{process_level}的文件{target_file_name}中不存在")
+
+def create_classified_keyword(new_keyword:str,keyword:SourceKeyword,matched_rule:str,process_level:int,target_file_name:str,target_sheet_name:str,matched_info:dict) -> ClassifiedKeyword:
+    """创建分类关键词对象"""
+    temp_item = ClassifiedKeyword()
+    temp_item.keyword = new_keyword
+    temp_item.source_file_name = keyword.source_file_name
+    temp_item.source_sheet_name = keyword.source_sheet_name
+    temp_item.source_file_Path = keyword.source_file_Path
+    temp_item.process_level = process_level
+    temp_item.output_file_name = target_file_name
+    temp_item.output_sheet_name = target_sheet_name
+    temp_item.matched_info = deepcopy(keyword.matched_info)
+    if process_level >=3:
+        new_matched_rule_col_name = f'阶段{process_level}匹配规则'
+        new_matched_rule_tag_col_name = f'阶段{process_level}匹配标签'
+    else:
+        new_matched_rule_col_name = '匹配规则'
+        new_matched_rule_tag_col_name = '匹配标签'
+    temp_item.matched_info[new_matched_rule_col_name] = matched_rule
+    temp_item.matched_info[new_matched_rule_tag_col_name] = matched_info.get('rule_tag','')
+    return temp_item
+
+def trans_classified_keyword_to_next_source_keyword(old_data:ClassifiedKeywordDTO)->SourceKeywordDTO:
+    result = SourceKeywordDTO()
+    for item in old_data.data:
+        result.data.append(
+            SourceKeyword(
+                keyword=item.keyword,
+                source_file_name=item.output_file_name,
+                source_sheet_name=item.output_sheet_name,
+                source_file_Path=item.source_file_Path,
+                process_level=item.process_level+1,
+                matched_info=item.matched_info
+                ))
+    return result
+
+def is_matched(rules:dict,keyword:SourceKeyword,matched_rule:str)->bool|List:
+     if keyword.process_level == 3:
+        if rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get(keyword.source_sheet_name,None):
+            return True
+        if rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get(keyword.source_sheet_name,None):
+            return True
+        if rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get('全',None):
+            return True
+        return False
+     elif keyword.process_level >3:
+         temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get(keyword.source_sheet_name,None)
+         if temp_info:
+             return temp_info
+         temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get(keyword.source_sheet_name,None)
+         if temp_info:
+             return temp_info
+         temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get('全',None)
+         if temp_info:
+             return temp_info
+         return False
+     else:
+         raise Exception(f'utils->is_matched要求keyword的proce_level>=3,{keyword},matched_rule:{matched_rule}')
+
+def get_rules_tag_info(rules:dict,keyword:SourceKeyword,matched_rule:str)->dict:
+    if keyword.process_level == 3:
+        if rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get(keyword.source_sheet_name,None):
+            return rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get(keyword.source_sheet_name,None)[0]
+        if rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get(keyword.source_sheet_name,None):
+            return rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get(keyword.source_sheet_name,None)[0]
+        if rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get('全',None):
+            return rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get('全',None)[0]
+        raise Exception(f'utlis->get_rules_tag_info,应该不存在无法找到的情况,keyword:{keyword},matched_rule:{matched_rule}')
+    elif keyword.process_level >3:
+        temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get(keyword.source_sheet_name,None)
+        if temp_info:
+            return temp_info[0]
+        temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get(keyword.source_sheet_name,None)
+        if temp_info:
+            return temp_info[0]
+        temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get('全',None)
+        if temp_info:
+            return temp_info[0]
+        raise Exception(f'utlis->get_rules_tag_info,应该不存在无法找到的情况,keyword:{keyword},matched_rule:{matched_rule}')
+    else:
+        raise Exception(f'utils->is_matched要求keyword的proce_level>=3,{keyword},matched_rule:{matched_rule}')
