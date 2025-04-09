@@ -1,82 +1,45 @@
-from typing import overload, Literal, Dict, List, Tuple, Union, cast
-from src.kw_cf.models import ClassifiedResult, ClassifiedKeyword, UnMatchedKeyword, UnclassifiedKeywords
+from src.kw_cf_v2.excel_handler import read_keywords,read_work_flow_rules
+from src.kw_cf_v2.models import FileInfo,SourceKeywordDTO
+from pathlib import Path
+from dataclasses import is_dataclass
+from src.kw_cf_v2.utils import processing_keyword
+from src.kw_cf_v2.main import main
 
-class YourClass:
-    @overload
-    @staticmethod
-    def get_classification_groups(
-        v: ClassifiedResult,
-        mode: Literal["output_name"],
-        keyword_status: Literal["match"]
-    ) -> Dict[str, List[ClassifiedKeyword]]: ...
+def test_keyword_read():
+    file_path = Path(__file__).parent.parent /"工作流结果1/网络工程_20250408101331..xlsx"
+    print(f'file_path:{file_path}')
+    print(f'file_path.exists():{file_path.exists()}')
+    print(f'file_path.is_file():{file_path.is_file()}')
+    file_info = FileInfo(file_path=file_path,sheet_name="Linux",file_name="网络工程")
+    keywords = read_keywords(file_info)
 
-    @overload
-    @staticmethod
-    def get_classification_groups(
-        v: ClassifiedResult,
-        mode: Literal["output_name"],
-        keyword_status: Literal["unmatch"]
-    ) -> Dict[str, List[UnMatchedKeyword]]: ...
+def test_is_dataclass():
+    print(is_dataclass(SourceKeywordDTO))
 
-    @overload
-    @staticmethod
-    def get_classification_groups(
-        v: ClassifiedResult,
-        mode: Literal["sheet"],
-        keyword_status: Literal["match"]
-    ) -> Dict[Tuple[str, str], List[ClassifiedKeyword]]: ...
+def test_dict_pop_none():
+    x = {'a':'1'}
+    y = x.pop('b')
+    print(f'y:{y}')
 
-    @overload
-    @staticmethod
-    def get_classification_groups(
-        v: ClassifiedResult,
-        mode: Literal["sheet"],
-        keyword_status: Literal["unmatch"]
-    ) -> Dict[Tuple[str, str], List[UnMatchedKeyword]]: ...
+def test_read_work_flow_rules():
+    file_path = Path(__file__).parent.parent /"data/工作流规则_Java类分词.xlsx"
+    print(f'file_path:{file_path}')
+    print(f'file_path.exists():{file_path.exists()}')
+    print(f'file_path.is_file():{file_path.is_file()}')
+    file_info = FileInfo(file_path=file_path,sheet_name="Java类分词",file_name="Java类分词")
+    rules = read_work_flow_rules(file_info)
+    print(f'rules:{rules}')
 
-    @overload
-    @staticmethod
-    def get_classification_groups(
-        v: ClassifiedResult,
-        mode: Literal["parent_rule"],
-        keyword_status: Literal["match"]
-    ) -> Dict[Tuple[str, str, str], List[ClassifiedKeyword]]: ...
+def test_processing_keyword():
+    keyword = ''
+    print(f'keyword:{[keyword]}')
+    print(f'processing_keyword(keyword):{[processing_keyword(keyword)]}')
 
-    @overload
-    @staticmethod
-    def get_classification_groups(
-        v: ClassifiedResult,
-        mode: Literal["parent_rule"],
-        keyword_status: Literal["unmatch"]
-    ) -> Dict[Tuple[str, str, str], List[UnMatchedKeyword]]: ...
+def test_main():
+    main()
 
-    @staticmethod
-    def get_classification_groups(
-        v: ClassifiedResult,
-        mode: Literal["output_name", "sheet", "parent_rule"],
-        keyword_status: Literal["match", "unmatch"]
-    ) -> Union[
-        Dict[str, List[ClassifiedKeyword]],
-        Dict[str, List[UnMatchedKeyword]],
-        Dict[Tuple[str, str], List[ClassifiedKeyword]],
-        Dict[Tuple[str, str], List[UnMatchedKeyword]],
-        Dict[Tuple[str, str, str], List[ClassifiedKeyword]],
-        Dict[Tuple[str, str, str], List[UnMatchedKeyword]],
-    ]:
-        if mode == "output_name":
-            if keyword_status == "match":
-                return cast(Dict[str, List[ClassifiedKeyword]], v.get_grouped_keywords(mode, keyword_status))
-            else:
-                return cast(Dict[str, List[UnMatchedKeyword]], v.get_grouped_keywords(mode, keyword_status))
-        elif mode == "sheet":
-            if keyword_status == "match":
-                return cast(Dict[Tuple[str, str], List[ClassifiedKeyword]], v.get_grouped_keywords(mode, keyword_status))
-            else:
-                return cast(Dict[Tuple[str, str], List[UnMatchedKeyword]], v.get_grouped_keywords(mode, keyword_status))
-        elif mode == "parent_rule":
-            if keyword_status == "match":
-                return cast(Dict[Tuple[str, str, str], List[ClassifiedKeyword]], v.get_grouped_keywords(mode, keyword_status))
-            else:
-                return cast(Dict[Tuple[str, str, str], List[UnMatchedKeyword]], v.get_grouped_keywords(mode, keyword_status))
-        else:
-            raise ValueError(f"Invalid mode: {mode}")
+if __name__ == '__main__':
+    test_main()
+
+
+

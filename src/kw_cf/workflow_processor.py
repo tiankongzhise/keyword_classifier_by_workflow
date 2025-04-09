@@ -384,15 +384,17 @@ class WorkFlowProcessor:
             
             temp_list = []
             for parent_workflow_rule_str in parent_workflow_rules_list:
-                
-                #针对上阶段分类规则进行筛选
-                parent_workflow_rules = all_parent_workflow_rules.filter_rules(parent_rule = parent_workflow_rule_str)
-                
-                #筛选存在上阶段分类规则的行
-                parent_workflow_rule_df = result_df.loc[
-                    result_df[parent_workflow_rule_column_name].str.lower() == parent_workflow_rule_str.lower()
-                ].copy()
-                
+                if parent_workflow_rule_str != '全':
+                    #针对上阶段分类规则进行筛选
+                    parent_workflow_rules = all_parent_workflow_rules.filter_rules(parent_rule = parent_workflow_rule_str)
+                    
+                    #筛选存在上阶段分类规则的行
+                    parent_workflow_rule_df = result_df.loc[
+                        result_df[parent_workflow_rule_column_name].str.lower() == parent_workflow_rule_str.lower()
+                    ].copy()
+                else:
+                    parent_workflow_rules = all_parent_workflow_rules.filter_rules(parent_rule = lambda x:x is not None)
+                    parent_workflow_rule_df = result_df.copy()
                 
                 if parent_workflow_rule_df.empty:
                     msg = f"文件{source_file_name}的{source_sheet_name}的{parent_workflow_rule_column_name}列没有{parent_workflow_rule_str}"
@@ -403,7 +405,7 @@ class WorkFlowProcessor:
             
             
  
-                unclassifie_keywords = self.tools.get_unclassified_keywords_from_result_df(result_df,
+                unclassifie_keywords = self.tools.get_unclassified_keywords_from_result_df(parent_workflow_rule_df,
                                                                                            source_file_name,
                                                                                            source_sheet_name,
                                                                                            level,parent_workflow_rule_column_name,

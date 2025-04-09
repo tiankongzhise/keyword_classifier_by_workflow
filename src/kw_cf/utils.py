@@ -161,6 +161,7 @@ class WorkFlowProcessorUtil(object):
                 self.error_callback(msg)
             raise Exception(msg)
         keywords = cast(List[str],result_df['关键词'].astype(str).tolist())
+        if 
         
         return models.UnclassifiedKeywords(data=keywords,
                                            source_file_name=source_file_name,

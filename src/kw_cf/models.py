@@ -443,7 +443,7 @@ class WorkFlowRules(BaseModel):
                 rule_tag = ''
             else:
                 rule_tag = rule.rule_tag
-            check.append(f'{rule.output_name}-{rule.rule}-{rule.classified_sheet_name}-{rule_tag}')
+            check.append(f'{rule.level}-{rule.output_name}-{rule.rule}-{rule.classified_sheet_name}-{rule_tag}')
         if len(check) != len(set(check)):
             count = [ check[i] for i, x in enumerate(check) if check.count(x) > 1]
             err_msg.append(f"工作流规则有重复{set(count)}")
