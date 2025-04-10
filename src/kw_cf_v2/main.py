@@ -38,10 +38,10 @@ def main():
         #         print(f'\nwhile中 {classified_keyword}\n')
         
         # 检验数据是否丢失
-        if rule_level == 1:
-            time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            if classified_keywords.data:
-                save_classified_keywords(classified_keywords,time_str=time_str,is_create_new_file=True)
+        # if rule_level == 1:
+        #     time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        #     if classified_keywords.data:
+        #         save_classified_keywords(classified_keywords,time_str=time_str,is_create_new_file=True)
         
         rule_level += 1
         if rule_level<=work_flow_rules.max_level:
