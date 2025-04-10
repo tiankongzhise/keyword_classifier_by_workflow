@@ -1,4 +1,4 @@
-from src.kw_cf.main import main
+from src.kw_cf_v2.gui import main
 
 
 
