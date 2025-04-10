@@ -101,7 +101,7 @@ def save_classified_keywords(classified_keywords:ClassifiedKeywordDTO,time_str:s
             for sheet_name,data in sheet_dict.items():
                 df = pd.DataFrame(data)
                 df.to_excel(writer, sheet_name=sheet_name, index=False)
-                message.info(f"保存{output_file_name}的{sheet_name}分类结果成功,文件路径:{file_path_map[output_file_name]}")
+            message.info(f"保存{output_file_name}的分类结果成功共保存了{len(sheet_dict.items())}个sheet,文件路径:{file_path_map[output_file_name]}")
 
             
   

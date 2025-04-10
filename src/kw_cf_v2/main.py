@@ -33,8 +33,12 @@ def main():
         classifier.set_rules(work_flow_stage_rule)
         classified_keywords = classifier.classify_keywords(keywords)
         
+        # for classified_keyword in classified_keywords.data:
+        #     if classified_keyword.keyword == '培训数据库编程':
+        #         print(f'\nwhile中 {classified_keyword}\n')
+        
         # 检验数据是否丢失
-        if True:
+        if rule_level == 1:
             time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
             if classified_keywords.data:
                 save_classified_keywords(classified_keywords,time_str=time_str,is_create_new_file=True)

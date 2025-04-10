@@ -10,7 +10,8 @@ from .utils import (processing_pipeline,
                     get_target_file_name,
                     get_target_sheet_name,
                     is_matched,
-                    get_rules_tag_info)
+                    get_rules_tag_info,
+                    get_last_level_rule)
 from copy import deepcopy
 
 class KeywordClassifier:
@@ -112,7 +113,7 @@ class KeywordClassifier:
         processed_rules = processing_pipeline(rules.value_list_by_field_name(field_name='rule'))
         rule_level = rules.value_list_by_field_name(field_name='rule_level')
         if len(rule_level)>1:
-            print(f'rule_level:{rule_level}')
+            message.error(f'set_rules->rule_level:{rule_level}存在多个层级规则')
             raise ValueError("存在多个层级的规则,非预期情况")
         self.process_level = list(rule_level)[0]
         
@@ -179,8 +180,9 @@ class KeywordClassifier:
         #对关键词进行检查 避免重复
         self.pre_check(keywords)
         result = ClassifiedKeywordDTO()
-        for source_keyword in tqdm(keywords.data,desc='正在进行分词'):
-            result.data.append(self.classify_keyword(source_keyword))
+        for source_keyword in tqdm(keywords.data,desc=f'正在进行{self.process_level}阶段的分词'):
+            result.data.append(self.classify_keyword_new(source_keyword))
+            
         return result
 
 
@@ -199,9 +201,6 @@ class KeywordClassifier:
         
 
 
-        if new_keyword == '培训数据库编程':
-            print(f'阶段{keyword.process_level}')
-
 
         for rule_text, rule_matcher in self.parsed_rules:
             if rule_matcher(new_keyword):
@@ -209,8 +208,7 @@ class KeywordClassifier:
                 
                 local_matched_rule:str = deepcopy(rule_text)
                 local_matched_rule = local_matched_rule.lower()
-                if new_keyword == '培训数据库编程':
-                    print(f'阶段{keyword.process_level}内部')
+
                 
                 if keyword.process_level == 1:
                     target_file_name = get_target_file_name(self.rules,keyword.process_level,local_matched_rule,keyword)
@@ -235,18 +233,6 @@ class KeywordClassifier:
                                                         target_file_name=target_file_name,
                                                         target_sheet_name=target_sheet_name,
                                                         matched_info=local_matched_info)
-                    if self.rules.get(keyword.process_level,{}).get(local_matched_rule,None):
-                        target_file_name = get_target_file_name(self.rules,keyword.process_level,local_matched_rule,keyword)
-                        target_sheet_name = '未分类'
-                        local_matched_info = deepcopy(keyword.matched_info)
-                        return create_classified_keyword(new_keyword=new_keyword,
-                                                        keyword=keyword,
-                                                        matched_rule=matched_rule,
-                                                        process_level=keyword.process_level,
-                                                        target_file_name=target_file_name,
-                                                        target_sheet_name=target_sheet_name,
-                                                        matched_info=local_matched_info)
-
 
                 elif keyword.process_level == 3:
                     if is_matched(self.rules,keyword,local_matched_rule):
@@ -290,11 +276,23 @@ class KeywordClassifier:
                 else:
                     raise Exception(f'{self.__class__.__name__}->classify_keyword 出现意料外的keyword.process_level:{keyword.process_level}')
         if matched_rule:
-            if keyword.process_level <4:
-                raise Exception(f'{self.__class__.__name__}->classify_keyword 出现意料外的matched_rule:{matched_rule},在循环在,应该提前返回才对,请检查是否存在冲突规则,keyword:{keyword}')
-            else:
-                message.warning(f'{self.__class__.__name__}->classify_keyword 出现意料外的matched_rule:{matched_rule},在循环在,应该提前返回才对,请检查是否存在冲突规则,keyword:{keyword}')
-
+            message.warning(f'{self.__class__.__name__}->classify_keyword 出现意料外的matched_rule:{matched_rule},在循环在,应该提前返回才对,请检查是否存在冲突规则,keyword:{keyword}')
+            # if keyword.process_level == 2:
+            #     return create_classified_keyword(new_keyword=new_keyword,
+            #                                     keyword=keyword,
+            #                                     matched_rule=matched_rule,
+            #                                     process_level=keyword.process_level,
+            #                                     target_file_name=keyword.source_file_name,
+            #                                     target_sheet_name='异常匹配',
+            #                                    matched_info=keyword.matched_info)
+            # else:
+            #     return create_classified_keyword(new_keyword=new_keyword,
+            #                                      keyword=keyword,
+            #                                     matched_rule=matched_rule,
+            #                                     process_level=keyword.process_level,
+            #                                     target_file_name=keyword.source_file_name,
+            #                                     target_sheet_name='异常匹配',
+            #                                    matched_info=keyword.matched_info)
 
         
         
@@ -324,8 +322,95 @@ class KeywordClassifier:
                                 matched_info={})    
 
 
-
-
-
+    def classify_keyword_new(self, keyword: SourceKeyword)->ClassifiedKeyword:
+        new_keyword = processing_keyword(keyword.keyword)
+        matched_rule = ''
+        matched_tag = False
+        #多阶段容错 未分类直接返回
+        if keyword.source_file_name == '未匹配任何规则':
+            return create_classified_keyword(new_keyword=new_keyword,
+                                keyword=keyword,
+                                matched_rule='',
+                                process_level=keyword.process_level,
+                                target_file_name='未匹配任何规则',
+                                target_sheet_name='Sheet1',
+                                matched_info=keyword.matched_info)
         
-        
+
+
+
+        for rule_text, rule_matcher in self.parsed_rules:
+            matched_tag = False
+            local_matched_rule = ''
+            target_file_name = ''
+            target_sheet_name = ''
+            temp_last_level_rule = ''
+            
+            if not rule_matcher(new_keyword):
+                continue 
+            matched_rule = rule_text
+            local_matched_rule:str = deepcopy(rule_text)
+            local_matched_rule = local_matched_rule.lower()
+            
+            if keyword.process_level == 1:
+                target_file_name = get_target_file_name(self.rules,keyword.process_level,local_matched_rule,keyword)
+                target_sheet_name = 'Sheet1'
+                matched_tag = True
+                break            
+            temp_file_name = get_target_file_name(self.rules,keyword.process_level,local_matched_rule,keyword)
+            if keyword.source_file_name != temp_file_name:
+                continue
+            target_file_name = temp_file_name
+            temp_sheet_name = get_target_sheet_name(self.rules,keyword.process_level,local_matched_rule,target_file_name,keyword)
+            if keyword.process_level == 2:
+                if temp_sheet_name:
+                    target_sheet_name = temp_sheet_name
+                    matched_tag = True
+                break
+            if keyword.source_sheet_name != temp_sheet_name:
+                continue
+            target_sheet_name = temp_sheet_name
+            
+            if target_sheet_name:
+                if keyword.process_level < 4:
+                    matched_tag = True
+                    break
+                last_matched_rule_col_name = f'阶段{keyword.process_level-1}匹配规则'
+                temp_last_level_rule = get_last_level_rule(self.rules,keyword.process_level,local_matched_rule,target_file_name,target_sheet_name,keyword)
+                if keyword.matched_info.get(last_matched_rule_col_name) == temp_last_level_rule:
+                    matched_tag = True
+                    break
+        if matched_tag:
+            return create_classified_keyword(
+                new_keyword=new_keyword,
+                keyword=keyword,
+                matched_rule=matched_rule,
+                process_level=keyword.process_level,
+                target_file_name=target_file_name,
+                target_sheet_name=target_sheet_name,
+                matched_info=keyword.matched_info
+                
+            )
+        if keyword.process_level == 2:    
+            return create_classified_keyword(
+                new_keyword=new_keyword,
+                keyword=keyword,
+                matched_rule='',
+                process_level=keyword.process_level,
+                target_file_name=keyword.source_file_name,
+                target_sheet_name='未匹配',
+                matched_info=keyword.matched_info
+            )
+        else:
+            return create_classified_keyword(
+                new_keyword=new_keyword,
+                keyword=keyword,
+                matched_rule='',
+                process_level=keyword.process_level,
+                target_file_name=keyword.source_file_name,
+                target_sheet_name=keyword.source_sheet_name,
+                matched_info=keyword.matched_info
+            )
+          
+                
+            

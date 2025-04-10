@@ -157,7 +157,8 @@ def get_target_file_name(rules_map:dict,process_level:int,matched_rule:str,keywo
         else:
             return rsp[0]
     else:
-        raise ValueError(f"get_target_file_name出现意料外的错误,规则{matched_rule}在等级{process_level}中不存在")
+        # raise ValueError(f"get_target_file_name出现意料外的错误,规则{matched_rule}在等级{process_level}中不存在")
+        return ''
 def get_target_sheet_name(rules_map:dict,process_level:int,matched_rule:str,target_file_name:str,keyword:SourceKeyword) -> str:
     """获取目标sheet名"""
     if process_level == 1:
@@ -175,7 +176,8 @@ def get_target_sheet_name(rules_map:dict,process_level:int,matched_rule:str,targ
         else:
             return rsp1[0]
     else:
-        raise ValueError(f"get_target_sheet_name出现意料外的错误,规则{matched_rule}在等级{process_level}的文件{target_file_name}中不存在")
+        # raise ValueError(f"get_target_sheet_name出现意料外的错误,规则{matched_rule}在等级{process_level}的文件{target_file_name}中不存在")
+        return ''
 
 def create_classified_keyword(new_keyword:str,keyword:SourceKeyword,matched_rule:str,process_level:int,target_file_name:str,target_sheet_name:str,matched_info:dict) -> ClassifiedKeyword:
     """创建分类关键词对象"""
@@ -214,6 +216,7 @@ def trans_classified_keyword_to_next_source_keyword(old_data:ClassifiedKeywordDT
 
 def is_matched(rules:dict,keyword:SourceKeyword,matched_rule:str)->bool|List:
     
+    
     if keyword.process_level == 2:
         if rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,None):
             return True
@@ -222,6 +225,8 @@ def is_matched(rules:dict,keyword:SourceKeyword,matched_rule:str)->bool|List:
     elif keyword.process_level == 3:
         if rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get(keyword.source_sheet_name,None):
             return True
+        if rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get('全',None):
+            return True
         if rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get(keyword.source_sheet_name,None):
             return True
         if rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get('全',None):
@@ -229,6 +234,9 @@ def is_matched(rules:dict,keyword:SourceKeyword,matched_rule:str)->bool|List:
         return False
     elif keyword.process_level >3:
         temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get(keyword.source_sheet_name,None)
+        if temp_info:
+            return temp_info
+        temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get('全',None)
         if temp_info:
             return temp_info
         temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get(keyword.source_sheet_name,None)
@@ -245,6 +253,8 @@ def get_rules_tag_info(rules:dict,keyword:SourceKeyword,matched_rule:str)->dict:
     if keyword.process_level == 3:
         if rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get(keyword.source_sheet_name,None):
             return rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get(keyword.source_sheet_name,None)[0]
+        if rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get('全',None):
+            return rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get('全',None)[0]
         if rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get(keyword.source_sheet_name,None):
             return rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get(keyword.source_sheet_name,None)[0]
         if rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get('全',None):
@@ -263,3 +273,32 @@ def get_rules_tag_info(rules:dict,keyword:SourceKeyword,matched_rule:str)->dict:
         raise Exception(f'utlis->get_rules_tag_info,应该不存在无法找到的情况,keyword:{keyword},matched_rule:{matched_rule}')
     else:
         raise Exception(f'utils->is_matched要求keyword的proce_level>=3,{keyword},matched_rule:{matched_rule}')
+
+def get_last_level_rule(rules:dict,level:int,matched_rule:str,file_name:str,sheet_name:str,keyword:SourceKeyword)->str:
+    rule1 = rules.get(level,{}).get(matched_rule,{}).get(file_name,{}).get(sheet_name,None)
+    if rule1:
+        if rule1[0]['limit_last_matched_rule'] == '全':
+            return keyword.matched_info.get(f'阶段{keyword.process_level-1}匹配规则','')
+        else:
+            return rule1[0]['limit_last_matched_rule']
+    rule2 = rules.get(level,{}).get(matched_rule,{}).get(file_name,{}).get('全',None)
+    if rule2:
+        if rule2[0]['limit_last_matched_rule'] == '全':
+            return keyword.matched_info.get(f'阶段{keyword.process_level-1}匹配规则','')
+        else:
+            return rule2[0]['limit_last_matched_rule']
+    rule3 = rules.get(level,{}).get(matched_rule,{}).get('全',{}).get(sheet_name,None)
+    if rule3:
+        if rule3[0]['limit_last_matched_rule'] == '全':
+            return keyword.matched_info.get(f'阶段{keyword.process_level-1}匹配规则','')
+        else:
+            return rule3[0]['limit_last_matched_rule']
+    rule4 = rules.get(level,{}).get(matched_rule,{}).get('全',{}).get('全',None)
+    if rule4:
+        if rule4[0]['limit_last_matched_rule'] == '全':
+            return keyword.matched_info.get(f'阶段{keyword.process_level-1}匹配规则','')
+        else:
+            return rule1[0]['limit_last_matched_rule']
+    return ''
+    
+    
