@@ -29,10 +29,15 @@ def main():
         if rule_level > work_flow_rules.max_level:
             break
 
-
         work_flow_stage_rule = work_flow_rules.filter(rule_level=rule_level)
         classifier.set_rules(work_flow_stage_rule)
         classified_keywords = classifier.classify_keywords(keywords)
+        
+        # 检验数据是否丢失
+        if True:
+            time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            if classified_keywords.data:
+                save_classified_keywords(classified_keywords,time_str=time_str,is_create_new_file=True)
         
         rule_level += 1
         if rule_level<=work_flow_rules.max_level:

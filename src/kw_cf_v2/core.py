@@ -109,8 +109,8 @@ class KeywordClassifier:
             error_callback: 错误回调函数，用于将错误信息传递给UI显示
         """
         
-        processed_rules = processing_pipeline(rules.value_set_by_field_name(field_name='rule'))
-        rule_level = rules.value_set_by_field_name(field_name='rule_level')
+        processed_rules = processing_pipeline(rules.value_list_by_field_name(field_name='rule'))
+        rule_level = rules.value_list_by_field_name(field_name='rule_level')
         if len(rule_level)>1:
             print(f'rule_level:{rule_level}')
             raise ValueError("存在多个层级的规则,非预期情况")
@@ -149,7 +149,7 @@ class KeywordClassifier:
         return parse_errors  # 返回解析错误列表
 
     def pre_check(self,keywords:SourceKeywordDTO) -> None:
-        k1 = keywords.value_set_by_field_name('keyword')
+        k1 = keywords.value_list_by_field_name('keyword')
         k2 = processing_pipeline(k1)
         if len(keywords.data) != len(k1):
             temp_list = []
@@ -199,14 +199,19 @@ class KeywordClassifier:
         
 
 
-
+        if new_keyword == '培训数据库编程':
+            print(f'阶段{keyword.process_level}')
 
 
         for rule_text, rule_matcher in self.parsed_rules:
             if rule_matcher(new_keyword):
                 matched_rule = rule_text
+                
                 local_matched_rule:str = deepcopy(rule_text)
                 local_matched_rule = local_matched_rule.lower()
+                if new_keyword == '培训数据库编程':
+                    print(f'阶段{keyword.process_level}内部')
+                
                 if keyword.process_level == 1:
                     target_file_name = get_target_file_name(self.rules,keyword.process_level,local_matched_rule,keyword)
                     target_sheet_name = get_target_sheet_name(self.rules,keyword.process_level,local_matched_rule,target_file_name,keyword)
@@ -219,7 +224,7 @@ class KeywordClassifier:
                                                      target_sheet_name=target_sheet_name,
                                                      matched_info=local_matched_info)
                 elif keyword.process_level == 2:
-                    if self.rules.get(keyword.process_level,{}).get(local_matched_rule,{}).get(keyword.source_file_name,None):
+                    if is_matched(self.rules,keyword,local_matched_rule):
                         target_file_name = get_target_file_name(self.rules,keyword.process_level,local_matched_rule,keyword)
                         target_sheet_name = get_target_sheet_name(self.rules,keyword.process_level,local_matched_rule,target_file_name,keyword)
                         local_matched_info = deepcopy(keyword.matched_info)
@@ -290,6 +295,8 @@ class KeywordClassifier:
             else:
                 message.warning(f'{self.__class__.__name__}->classify_keyword 出现意料外的matched_rule:{matched_rule},在循环在,应该提前返回才对,请检查是否存在冲突规则,keyword:{keyword}')
 
+
+        
         
         if keyword.process_level == 1:
             return create_classified_keyword(new_keyword=new_keyword,

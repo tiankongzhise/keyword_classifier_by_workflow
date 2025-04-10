@@ -4,6 +4,7 @@ from pathlib import Path
 from copy import deepcopy
 import tomllib
 
+
 @dataclass
 class SourceKeyword:
     '''
@@ -130,8 +131,9 @@ class FieldColValueListMixin:
         with config_path.open("rb") as f:  # 必须用二进制模式
             config = tomllib.load(f)
             cls._case_sensitive = config.get("filter", {}).get("case_sensitive", False)
-    def value_set_by_field_name(self,field_name:str)->Set[Any]:
+    def value_list_by_field_name(self,field_name:str)->List[Any]:
         """根据字段名获取字段值"""
+        from .utils import preserve_order_deduplicate
         if not hasattr(self, "data"):
             raise AttributeError(f"类 {self.__class__.__name__} 必须包含一个名为 'data' 的属性")
         temp_list = []
@@ -139,7 +141,7 @@ class FieldColValueListMixin:
             if not hasattr(item, field_name):
                 raise ValueError(f"字段 '{field_name}' 不存在于类 {item.__class__.__name__}")
             temp_list.append(getattr(item, field_name))
-        return set(temp_list)
+        return preserve_order_deduplicate(temp_list)
 
     
 @dataclass

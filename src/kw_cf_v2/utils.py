@@ -213,7 +213,13 @@ def trans_classified_keyword_to_next_source_keyword(old_data:ClassifiedKeywordDT
     return result
 
 def is_matched(rules:dict,keyword:SourceKeyword,matched_rule:str)->bool|List:
-     if keyword.process_level == 3:
+    
+    if keyword.process_level == 2:
+        if rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,None):
+            return True
+        return False
+
+    elif keyword.process_level == 3:
         if rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get(keyword.source_sheet_name,None):
             return True
         if rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get(keyword.source_sheet_name,None):
@@ -221,19 +227,19 @@ def is_matched(rules:dict,keyword:SourceKeyword,matched_rule:str)->bool|List:
         if rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get('全',None):
             return True
         return False
-     elif keyword.process_level >3:
-         temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get(keyword.source_sheet_name,None)
-         if temp_info:
-             return temp_info
-         temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get(keyword.source_sheet_name,None)
-         if temp_info:
-             return temp_info
-         temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get('全',None)
-         if temp_info:
-             return temp_info
-         return False
-     else:
-         raise Exception(f'utils->is_matched要求keyword的proce_level>=3,{keyword},matched_rule:{matched_rule}')
+    elif keyword.process_level >3:
+        temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get(keyword.source_file_name,{}).get(keyword.source_sheet_name,None)
+        if temp_info:
+            return temp_info
+        temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get(keyword.source_sheet_name,None)
+        if temp_info:
+            return temp_info
+        temp_info = rules.get(keyword.process_level,{}).get(matched_rule,{}).get('全',{}).get('全',None)
+        if temp_info:
+            return temp_info
+        return False
+    else:
+        raise Exception(f'utils->is_matched要求keyword的proce_level>=3,{keyword},matched_rule:{matched_rule}')
 
 def get_rules_tag_info(rules:dict,keyword:SourceKeyword,matched_rule:str)->dict:
     if keyword.process_level == 3:
