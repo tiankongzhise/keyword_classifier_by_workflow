@@ -224,7 +224,7 @@ class KeywordClassifierGUI:
             
             # Generate output path
             output_path = Path(self.output_dir.get())
-            message.info(f"正在生成分类结果文件路径: {output_path}")
+            message.debug(f"正在生成分类结果文件路径: {output_path}")
             
             # Create file info objects
             keyword_file_info = FileInfo(
@@ -258,13 +258,13 @@ class KeywordClassifierGUI:
                 self.update_message(f"正在处理规则级别 {rule_level}...")
                 work_flow_stage_rule = work_flow_rules.filter(rule_level=rule_level)
                 classifier.set_rules(work_flow_stage_rule)
-                self.update_message(f"设置规则完成")
+                message.debug(f"设置规则完成")
                 classified_keywords = classifier.classify_keywords(keywords)
-                self.update_message(f"分词完成")
+                message.debug(f"分词完成")
                 rule_level += 1
                 if rule_level <= work_flow_rules.max_level:
                     keywords = trans_classified_keyword_to_next_source_keyword(classified_keywords)
-                self.update_message(f"设置下一层级关键词完成")
+                message.debug(f"设置下一层级关键词完成")
             # Save results
             time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
             if classified_keywords.data:

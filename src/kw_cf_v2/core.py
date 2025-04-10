@@ -255,11 +255,11 @@ class KeywordClassifier:
             target_sheet_name = temp_sheet_name
             
             if target_sheet_name:
+                last_matched_rule_col_name = f'阶段{keyword.process_level-1}匹配规则'
+                temp_last_level_rule,temp_last_level_rule_tag = get_last_level_rule(self.rules,keyword.process_level,local_matched_rule,target_file_name,target_sheet_name,keyword)
                 if keyword.process_level < 4:
                     matched_tag = True
                     break
-                last_matched_rule_col_name = f'阶段{keyword.process_level-1}匹配规则'
-                temp_last_level_rule,temp_last_level_rule_tag = get_last_level_rule(self.rules,keyword.process_level,local_matched_rule,target_file_name,target_sheet_name,keyword)
                 if keyword.matched_info.get(last_matched_rule_col_name) == temp_last_level_rule:
                     matched_tag = True
                     break
