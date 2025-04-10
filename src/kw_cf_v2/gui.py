@@ -4,11 +4,11 @@ import toml
 from pathlib import Path
 from tqdm import tqdm
 from datetime import datetime
-from src.kw_cf_v2.message import message
-from src.kw_cf_v2.core import KeywordClassifier
-from src.kw_cf_v2.excel_handler import read_keywords, read_work_flow_rules, save_classified_keywords
-from src.kw_cf_v2.models import FileInfo, SourceKeyword, SourceKeywordDTO,ClassifiedKeywordDTO
-from src.kw_cf_v2.utils import trans_classified_keyword_to_next_source_keyword
+from .message import message
+from .core import KeywordClassifier
+from .excel_handler import read_keywords, read_work_flow_rules, save_classified_keywords
+from .models import FileInfo, ClassifiedKeywordDTO
+from .utils import trans_classified_keyword_to_next_source_keyword,get_exe_dir
 
 class KeywordClassifierGUI:
     def __init__(self, root):
@@ -17,13 +17,13 @@ class KeywordClassifierGUI:
         self.root.geometry("800x600")
         
         # Config file path
-        self.config_path = Path(__file__).parent / "config.toml"
+        self.config_path = get_exe_dir() / "config.toml"
         
         # Variables
         self.rule_file = tk.StringVar()
         self.keyword_file = tk.StringVar()
         # Default to '工作流结果' subfolder, create if needed
-        output_dir = Path(__file__).parent.parent.parent / "工作流结果"
+        output_dir = get_exe_dir() / "工作流结果"
         output_dir.mkdir(exist_ok=True)
         self.output_dir = tk.StringVar(value=str(output_dir))
         self.case_sensitive = tk.BooleanVar()

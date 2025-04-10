@@ -2,6 +2,18 @@ from typing import List,Tuple,Set,Any
 from .message import message
 from .models import ClassifiedKeyword,WorkFlowRuleDTO,SourceKeyword,ClassifiedKeywordDTO,SourceKeywordDTO
 from copy import deepcopy
+import sys
+from pathlib import Path
+
+def get_exe_dir():
+    """获取可执行文件所在目录"""
+    if getattr(sys, 'frozen', False):
+        # 打包后的可执行文件目录
+        return Path(sys.executable).parent
+    else:
+        # 开发环境的脚本目录
+        return Path(__file__).parent
+
 def preprocess_text(text, error_callback=None):
     """预处理文本，清除不可见的干扰字符
     Args:
