@@ -274,31 +274,31 @@ def get_rules_tag_info(rules:dict,keyword:SourceKeyword,matched_rule:str)->dict:
     else:
         raise Exception(f'utils->is_matched要求keyword的proce_level>=3,{keyword},matched_rule:{matched_rule}')
 
-def get_last_level_rule(rules:dict,level:int,matched_rule:str,file_name:str,sheet_name:str,keyword:SourceKeyword)->str:
+def get_last_level_rule(rules:dict,level:int,matched_rule:str,file_name:str,sheet_name:str,keyword:SourceKeyword)->tuple:
     rule1 = rules.get(level,{}).get(matched_rule,{}).get(file_name,{}).get(sheet_name,None)
     if rule1:
         if rule1[0]['limit_last_matched_rule'] == '全':
-            return keyword.matched_info.get(f'阶段{keyword.process_level-1}匹配规则','')
+            return keyword.matched_info.get(f'阶段{keyword.process_level-1}匹配规则',''),rule1[0]['rule_tag']
         else:
-            return rule1[0]['limit_last_matched_rule']
+            return rule1[0]['limit_last_matched_rule'],rule1[0]['rule_tag']
     rule2 = rules.get(level,{}).get(matched_rule,{}).get(file_name,{}).get('全',None)
     if rule2:
         if rule2[0]['limit_last_matched_rule'] == '全':
-            return keyword.matched_info.get(f'阶段{keyword.process_level-1}匹配规则','')
+            return keyword.matched_info.get(f'阶段{keyword.process_level-1}匹配规则',''),rule2[0]['rule_tag']
         else:
-            return rule2[0]['limit_last_matched_rule']
+            return rule2[0]['limit_last_matched_rule'],rule2[0]['rule_tag']
     rule3 = rules.get(level,{}).get(matched_rule,{}).get('全',{}).get(sheet_name,None)
     if rule3:
         if rule3[0]['limit_last_matched_rule'] == '全':
-            return keyword.matched_info.get(f'阶段{keyword.process_level-1}匹配规则','')
+            return keyword.matched_info.get(f'阶段{keyword.process_level-1}匹配规则',''),rule3[0]['rule_tag']
         else:
-            return rule3[0]['limit_last_matched_rule']
+            return rule3[0]['limit_last_matched_rule'],rule3[0]['rule_tag']
     rule4 = rules.get(level,{}).get(matched_rule,{}).get('全',{}).get('全',None)
     if rule4:
         if rule4[0]['limit_last_matched_rule'] == '全':
-            return keyword.matched_info.get(f'阶段{keyword.process_level-1}匹配规则','')
+            return keyword.matched_info.get(f'阶段{keyword.process_level-1}匹配规则',''),rule4[0]['rule_tag']
         else:
-            return rule1[0]['limit_last_matched_rule']
-    return ''
+            return rule4[0]['limit_last_matched_rule'],rule4[0]['rule_tag']
+    return '',''
     
     

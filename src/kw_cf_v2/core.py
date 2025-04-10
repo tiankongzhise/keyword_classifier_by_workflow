@@ -207,7 +207,7 @@ class KeywordClassifier:
             target_file_name = ''
             target_sheet_name = ''
             temp_last_level_rule = ''
-            
+            temp_last_level_rule_tag =''
             if not rule_matcher(new_keyword):
                 continue 
             matched_rule = rule_text
@@ -238,11 +238,13 @@ class KeywordClassifier:
                     matched_tag = True
                     break
                 last_matched_rule_col_name = f'阶段{keyword.process_level-1}匹配规则'
-                temp_last_level_rule = get_last_level_rule(self.rules,keyword.process_level,local_matched_rule,target_file_name,target_sheet_name,keyword)
+                temp_last_level_rule,temp_last_level_rule_tag = get_last_level_rule(self.rules,keyword.process_level,local_matched_rule,target_file_name,target_sheet_name,keyword)
                 if keyword.matched_info.get(last_matched_rule_col_name) == temp_last_level_rule:
                     matched_tag = True
                     break
         if matched_tag:
+            local_matched_info = deepcopy(keyword.matched_info)
+            local_matched_info.update({'rule_tag':temp_last_level_rule_tag})
             return create_classified_keyword(
                 new_keyword=new_keyword,
                 keyword=keyword,
@@ -250,7 +252,7 @@ class KeywordClassifier:
                 process_level=keyword.process_level,
                 target_file_name=target_file_name,
                 target_sheet_name=target_sheet_name,
-                matched_info=keyword.matched_info
+                matched_info=local_matched_info
                 
             )
         if keyword.process_level == 2:    
