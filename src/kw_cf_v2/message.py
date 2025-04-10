@@ -1,4 +1,4 @@
-
+from typing import Any
 
 class Message(object):
     def __init__(self,*args,**kwargs):
@@ -8,9 +8,9 @@ class Message(object):
     def __call__(self,*args,**kwargs):
         print(*args,**kwargs)
 
-    def set_handler(self,handler:str='print'):
-        if handler == 'print':
-            return self._print
+    def set_handler(self,handler:Any=None):
+        if handler:
+            self.define_handler = handler
         
         return self._print
             
