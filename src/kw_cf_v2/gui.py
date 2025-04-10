@@ -8,7 +8,8 @@ from .message import message
 from .core import KeywordClassifier
 from .excel_handler import read_keywords, read_work_flow_rules, save_classified_keywords
 from .models import FileInfo, ClassifiedKeywordDTO
-from .utils import trans_classified_keyword_to_next_source_keyword,get_exe_dir
+from .utils import trans_classified_keyword_to_next_source_keyword,get_exe_dir,get_func_env
+from .tk_root import root
 
 class KeywordClassifierGUI:
     def __init__(self, root):
@@ -16,6 +17,7 @@ class KeywordClassifierGUI:
         self.root.title("关键词分类工具")
         self.root.geometry("800x600")
         
+
         # Config file path
         self.config_path = get_exe_dir() / "config.toml"
         
@@ -23,7 +25,11 @@ class KeywordClassifierGUI:
         self.rule_file = tk.StringVar()
         self.keyword_file = tk.StringVar()
         # Default to '工作流结果' subfolder, create if needed
-        output_dir = get_exe_dir() / "工作流结果"
+        func_env = get_func_env()
+        if func_env == 'py':
+            output_dir = get_exe_dir().parent.parent / "工作流结果"
+        else:
+            output_dir =get_exe_dir() / "工作流结果"
         output_dir.mkdir(exist_ok=True)
         self.output_dir = tk.StringVar(value=str(output_dir))
         self.case_sensitive = tk.BooleanVar()
@@ -217,7 +223,8 @@ class KeywordClassifierGUI:
                     return super().update(n)
             
             # Generate output path
-            output_path = self.get_output_path()
+            output_path = Path(self.output_dir.get())
+            message.info(f"正在生成分类结果文件路径: {output_path}")
             
             # Create file info objects
             keyword_file_info = FileInfo(
@@ -231,10 +238,10 @@ class KeywordClassifierGUI:
             )
             
             # Read files
-            self.update_message("正在读取关键词文件...")
+            self.update_message(f"正在读取关键词文件...{keyword_file_info}")
             keywords = read_keywords(keyword_file_info, 1)
             
-            self.update_message("正在读取工作流规则...")
+            self.update_message(f"正在读取工作流规则...{work_flow_file_info}")
             work_flow_rules = read_work_flow_rules(work_flow_file_info)
             
             # Create classifier
@@ -251,19 +258,21 @@ class KeywordClassifierGUI:
                 self.update_message(f"正在处理规则级别 {rule_level}...")
                 work_flow_stage_rule = work_flow_rules.filter(rule_level=rule_level)
                 classifier.set_rules(work_flow_stage_rule)
+                self.update_message(f"设置规则完成")
                 classified_keywords = classifier.classify_keywords(keywords)
-                
+                self.update_message(f"分词完成")
                 rule_level += 1
                 if rule_level <= work_flow_rules.max_level:
                     keywords = trans_classified_keyword_to_next_source_keyword(classified_keywords)
-            
+                self.update_message(f"设置下一层级关键词完成")
             # Save results
             time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
             if classified_keywords.data:
                 save_classified_keywords(
                     classified_keywords,
                     time_str=time_str,
-                    is_create_new_file=True
+                    is_create_new_file=True,
+                    output_dir=output_path
                 )
                 self.update_message(f"分类结果已保存到: {output_path}")
                 messagebox.showinfo("完成", f"关键词分类已完成！\n结果保存在: {output_path}")
@@ -276,7 +285,7 @@ class KeywordClassifierGUI:
             messagebox.showerror("错误", f"处理过程中发生错误:\n{str(e)}")
 
 def main():
-    root = tk.Tk()
+    
     app = KeywordClassifierGUI(root)
     root.mainloop()
 

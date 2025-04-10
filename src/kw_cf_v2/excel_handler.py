@@ -4,7 +4,7 @@ from typing import cast
 import pandas as pd
 from pathlib import Path
 from .utils import fomart_classified_keywords_to_dict
-from .utils import processing_keyword
+from .utils import processing_keyword,get_func_env,get_exe_dir
 from openpyxl import load_workbook
 def read_keywords(file_info:FileInfo,level:int) -> SourceKeywordDTO:
     file_name = file_info.file_name
@@ -66,19 +66,26 @@ def set_file_name(source_file_path:Path,
                   process_level:int,
                   output_file_name:str,
                   time_str:str,
-                  is_create_new_file:bool=False)->Path:
+                  file_path:Path,
+                  is_create_new_file:bool=False,
+                  )->Path:
     if process_level == 1:
-        return Path(__file__).parent.parent.parent / f"工作流结果/{output_file_name}_{time_str}.xlsx"
+        return    file_path / f"{output_file_name}_{time_str}.xlsx"
     if is_create_new_file:
-        return Path(__file__).parent.parent.parent / f"工作流结果/{output_file_name}_{time_str}.xlsx"
+        return file_path/ f"{output_file_name}_{time_str}.xlsx"
     else:
         return source_file_path
 
 
-def save_classified_keywords(classified_keywords:ClassifiedKeywordDTO,time_str:str,is_create_new_file:bool=False):
+def save_classified_keywords(classified_keywords:ClassifiedKeywordDTO,time_str:str,is_create_new_file:bool=False,output_dir:Path|None=None):
+    message.info(f"开始保存分类结果,time_str:{time_str},is_create_new_file:{is_create_new_file},output_dir:{output_dir}")
     result = {}
     file_path_map = {}
-    output_dir = Path(__file__).parent.parent.parent / "工作流结果"
+    if output_dir is  None:
+        if get_func_env() == 'py':
+            output_dir = get_exe_dir().parent.parent / "工作流结果"
+        else:
+            output_dir = get_exe_dir() / "工作流结果"
     if not output_dir.exists(): 
         output_dir.mkdir()
     for classified_keyword in classified_keywords.data:
@@ -89,6 +96,7 @@ def save_classified_keywords(classified_keywords:ClassifiedKeywordDTO,time_str:s
                                                                          temp_dict['process_level'],
                                                                          temp_dict['output_file_name'],
                                                                          time_str,
+                                                                         output_dir,
                                                                          is_create_new_file
                                                                          )
         else:

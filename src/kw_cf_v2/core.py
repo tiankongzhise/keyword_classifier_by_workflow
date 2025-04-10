@@ -2,7 +2,6 @@ from lark import Lark, Transformer, v_args
 from typing import List, Optional, Callable
 from .models import WorkFlowRuleDTO,SourceKeyword,SourceKeywordDTO,ClassifiedKeyword,ClassifiedKeywordDTO,WorkFlowRule
 from .message import message
-from tqdm import tqdm
 from .utils import (processing_pipeline,
                     processing_keyword,
                     trans_work_flow_rules_to_dict,
@@ -11,8 +10,19 @@ from .utils import (processing_pipeline,
                     get_target_sheet_name,
                     is_matched,
                     get_rules_tag_info,
+                    get_func_env,
                     get_last_level_rule)
 from copy import deepcopy
+
+function_env = get_func_env()
+if function_env == 'py':
+    from tqdm import tqdm
+elif function_env == 'exe':
+    from .bar import TkProgressBar as tqdm
+else:
+    raise ValueError("不支持的运行环境")
+
+
 
 class KeywordClassifier:
     def __init__(self, case_sensitive=False, separator="&"):
@@ -179,13 +189,22 @@ class KeywordClassifier:
         """对关键词进行分类（单进程版本）"""
         #对关键词进行检查 避免重复
         self.pre_check(keywords)
+        message.debug('classify_keywords pre_check完成')
+        
         result = ClassifiedKeywordDTO()
+        message.debug(f'classify_keywords result初始化')
+        message.debug(f'classify_keywords self.process_level:{self.process_level}')
+        message.debug(f'classify_keywords keywords.data:{keywords.data}')
         for source_keyword in tqdm(keywords.data,desc=f'正在进行{self.process_level}阶段的分词'):
+            message.debug(f'classify_keywords source_keyword:{source_keyword}')
             result.data.append(self.classify_keyword(source_keyword))
-            
+        message.debug('classify_keywords result完成')    
         return result
     def classify_keyword(self, keyword: SourceKeyword)->ClassifiedKeyword:
+        message.debug('classify_keyword 开始')
+        message.debug(f'classify_keyword keyword:{keyword}')
         new_keyword = processing_keyword(keyword.keyword)
+        message.debug('classify_keyword new_keyword')
         matched_rule = ''
         matched_tag = False
         #多阶段容错 未分类直接返回
@@ -200,7 +219,7 @@ class KeywordClassifier:
         
 
 
-
+        message.debug(f'classify_keyword->for循环之前')
         for rule_text, rule_matcher in self.parsed_rules:
             matched_tag = False
             local_matched_rule = ''
@@ -210,6 +229,7 @@ class KeywordClassifier:
             temp_last_level_rule_tag =''
             if not rule_matcher(new_keyword):
                 continue 
+            message.debug(f'classify_keyword->rule_matcher')
             matched_rule = rule_text
             local_matched_rule:str = deepcopy(rule_text)
             local_matched_rule = local_matched_rule.lower()
@@ -218,7 +238,8 @@ class KeywordClassifier:
                 target_file_name = get_target_file_name(self.rules,keyword.process_level,local_matched_rule,keyword)
                 target_sheet_name = 'Sheet1'
                 matched_tag = True
-                break            
+                break
+            message.debug(f'classify_keyword->level==1')            
             temp_file_name = get_target_file_name(self.rules,keyword.process_level,local_matched_rule,keyword)
             if keyword.source_file_name != temp_file_name:
                 continue
@@ -242,6 +263,7 @@ class KeywordClassifier:
                 if keyword.matched_info.get(last_matched_rule_col_name) == temp_last_level_rule:
                     matched_tag = True
                     break
+        message.debug(f'classify_keyword->matched_tag之前')
         if matched_tag:
             local_matched_info = deepcopy(keyword.matched_info)
             local_matched_info.update({'rule_tag':temp_last_level_rule_tag})
@@ -255,6 +277,7 @@ class KeywordClassifier:
                 matched_info=local_matched_info
                 
             )
+        message.debug(f'classify_keyword->matched_tag之后')
         if keyword.process_level == 2:    
             return create_classified_keyword(
                 new_keyword=new_keyword,

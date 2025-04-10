@@ -13,6 +13,16 @@ def get_exe_dir():
     else:
         # 开发环境的脚本目录
         return Path(__file__).parent
+def get_func_env():
+    """获取运行环境"""
+    if getattr(sys, 'frozen', False):
+        # 打包后的可执行文件目录
+        return 'exe'
+    else:
+        # 开发环境的脚本目录
+        return 'py'
+
+
 
 def preprocess_text(text, error_callback=None):
     """预处理文本，清除不可见的干扰字符
